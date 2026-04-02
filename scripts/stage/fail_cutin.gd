@@ -33,48 +33,52 @@ func _build() -> void:
 	bg.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(bg)
 
-	var label := Label.new()
-	label.text = "失 敗"
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	label.add_theme_font_size_override("font_size", 72)
-	label.add_theme_color_override("font_color", Color(1.0, 0.2, 0.15))
-	label.position = Vector2(560, 350)
-	label.size = Vector2(800, 100)
-	label.modulate.a = 0
-	add_child(label)
+	var fail_text_sp := Sprite2D.new()
+	fail_text_sp.texture = load("res://assets/sprites/cutin/fail_text.png")
+	var img_w: float = fail_text_sp.texture.get_width()
+	var img_h: float = fail_text_sp.texture.get_height()
+	var fail_sc := 1.5
+	fail_text_sp.position = Vector2(100 + img_w * fail_sc / 2.0, 60 + img_h * fail_sc / 2.0 - 100.0)
+	fail_text_sp.scale = Vector2.ZERO
+	add_child(fail_text_sp)
 
-	var btn_container := HBoxContainer.new()
-	btn_container.alignment = BoxContainer.ALIGNMENT_CENTER
-	btn_container.add_theme_constant_override("separation", 40)
-	btn_container.position = Vector2(560, 540)
-	btn_container.size = Vector2(800, 60)
-	btn_container.modulate.a = 0
-	add_child(btn_container)
+	var tex_retry: Texture2D = load("res://assets/sprites/cutin/btn_fail_retry.png")
+	var tex_title: Texture2D = load("res://assets/sprites/cutin/btn_fail_title.png")
 
-	var retry_btn := Button.new()
-	retry_btn.text = "リトライ"
-	retry_btn.custom_minimum_size = Vector2(250, 56)
-	retry_btn.add_theme_font_size_override("font_size", 24)
-	retry_btn.pressed.connect(func():
+	var sc := 1.0
+	var retry_w: float = tex_retry.get_width() * sc
+	var retry_h: float = tex_retry.get_height() * sc
+	var title_w: float = tex_title.get_width() * sc
+	var title_h: float = tex_title.get_height() * sc
+	var gap := 24.0
+	var total_h: float = retry_h + gap + title_h
+	var start_y: float = (1080 - total_h) / 2.0
+
+	var btn_retry := HoverButton.create(tex_retry, Vector2(retry_w, retry_h))
+	btn_retry.position = Vector2((1920 - retry_w) / 2.0, start_y)
+	btn_retry.modulate.a = 0
+	btn_retry.pressed.connect(func():
 		GameManager.play_click_se()
 		retry_requested.emit()
 	)
-	retry_btn.mouse_entered.connect(GameManager.play_hover_se)
-	btn_container.add_child(retry_btn)
+	add_child(btn_retry)
 
-	var title_btn := Button.new()
-	title_btn.text = "タイトルへ"
-	title_btn.custom_minimum_size = Vector2(250, 56)
-	title_btn.add_theme_font_size_override("font_size", 24)
-	title_btn.pressed.connect(func():
+	var btn_title := HoverButton.create(tex_title, Vector2(title_w, title_h))
+	btn_title.position = Vector2((1920 - title_w) / 2.0, start_y + retry_h + gap)
+	btn_title.modulate.a = 0
+	btn_title.pressed.connect(func():
 		GameManager.play_click_se()
 		title_requested.emit()
 	)
-	title_btn.mouse_entered.connect(GameManager.play_hover_se)
-	btn_container.add_child(title_btn)
+	add_child(btn_title)
 
 	var tw := create_tween()
-	tw.tween_property(bg, "color", Color(0.12, 0.0, 0.0, 0.85), 0.5)
-	tw.parallel().tween_property(label, "modulate:a", 1.0, 0.4).set_delay(0.15)
-	tw.tween_property(btn_container, "modulate:a", 1.0, 0.3)
+	tw.tween_property(bg, "color:a", 0.5, 0.5)
+	tw.parallel().tween_property(btn_retry, "modulate:a", 1.0, 0.3)
+	tw.parallel().tween_property(btn_title, "modulate:a", 1.0, 0.3)
+
+	var bounce_tw := create_tween()
+	bounce_tw.tween_property(fail_text_sp, "scale", Vector2(fail_sc * 1.15, fail_sc * 1.15), 0.2) \
+		.set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+	bounce_tw.tween_property(fail_text_sp, "scale", Vector2(fail_sc, fail_sc), 0.15) \
+		.set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BOUNCE)

@@ -501,6 +501,7 @@ func _build_inventory() -> void:
 
 	var sign_sprite := Sprite2D.new()
 	sign_sprite.texture = tex_mirror_sign
+	sign_sprite.scale = Vector2(1.5, 1.5)
 	sign_sprite.position = Vector2(
 		GameManager.INV_X + GameManager.INV_W / 2.0,
 		GameManager.INV_Y + 50)
@@ -667,6 +668,7 @@ func _start_collision_anim() -> void:
 
 	_collision_frame_idx = 0
 	_collision_looping = false
+	_show_fail_cutin()
 	_advance_collision_frame()
 
 
@@ -678,20 +680,18 @@ func _advance_collision_frame() -> void:
 
 	if _collision_frame_idx < 4:
 		_collision_frame_idx += 1
-		var delay: float = 0.35
+		var delay: float = 0.175
 		get_tree().create_timer(delay).timeout.connect(_advance_collision_frame)
-		if _collision_frame_idx == 4:
-			_show_fail_cutin()
 	else:
 		_collision_looping = true
 		_collision_frame_idx = 4 if _collision_frame_idx == 5 else 5
-		get_tree().create_timer(0.5).timeout.connect(_advance_collision_frame)
+		get_tree().create_timer(0.25).timeout.connect(_advance_collision_frame)
 
 
 func _show_fail_cutin() -> void:
 	_fail_cutin = FailCutin.new()
 	add_child(_fail_cutin)
-	_fail_cutin.retry_requested.connect(reset_stage)
+	_fail_cutin.retry_requested.connect(reset_stage.bind(true))
 	_fail_cutin.title_requested.connect(_on_title)
 	_fail_cutin.play()
 
@@ -1005,7 +1005,8 @@ func _on_path_end() -> void:
 
 # ==================== ナビゲーション ====================
 
-func reset_stage() -> void:
+## preserve_placed_mirrors: 失敗カットインのリトライ時 true（配置済み鏡・残インベントリを維持）
+func reset_stage(preserve_placed_mirrors: bool = false) -> void:
 	if _clear_cutin:
 		_clear_cutin.queue_free()
 		_clear_cutin = null
@@ -1045,27 +1046,28 @@ func reset_stage() -> void:
 	for child in effects_layer.get_children():
 		child.queue_free()
 
-	var to_remove: Array[Sprite2D] = []
-	for child: Node in mirrors_layer.get_children():
-		var m: Sprite2D = child as Sprite2D
-		if not m.get_meta("is_fixed"):
-			to_remove.append(m)
-	for m in to_remove:
-		m.queue_free()
+	if not preserve_placed_mirrors:
+		var to_remove: Array[Sprite2D] = []
+		for child: Node in mirrors_layer.get_children():
+			var m: Sprite2D = child as Sprite2D
+			if not m.get_meta("is_fixed"):
+				to_remove.append(m)
+		for m in to_remove:
+			m.queue_free()
 
-	for v in inv_visuals:
-		if is_instance_valid(v):
-			v.queue_free()
-	inv_visuals.clear()
-	inv_count = 0
-	for i in range(int(stage_data.mirror_count)):
-		var s := Sprite2D.new()
-		s.texture = tex_mirror_front
-		s.position = _inv_item_pos(i)
-		s.scale = Vector2(0.9, 0.9)
-		add_child(s)
-		inv_visuals.append(s)
-		inv_count += 1
+		for v in inv_visuals:
+			if is_instance_valid(v):
+				v.queue_free()
+		inv_visuals.clear()
+		inv_count = 0
+		for i in range(int(stage_data.mirror_count)):
+			var s := Sprite2D.new()
+			s.texture = tex_mirror_front
+			s.position = _inv_item_pos(i)
+			s.scale = Vector2(0.9, 0.9)
+			add_child(s)
+			inv_visuals.append(s)
+			inv_count += 1
 
 	held_mirror = null
 	if not bgm_player.playing:

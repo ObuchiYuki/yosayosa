@@ -56,8 +56,8 @@ func _load_assets() -> void:
 		"res://assets/sprites/cutin/char_012_jito.png",
 		"res://assets/sprites/cutin/char_012_open.png",
 		"res://assets/sprites/cutin/char_012_close.png",
-		"res://assets/sprites/cutin/char_013.png",
 		"res://assets/sprites/cutin/char_013_5.png",
+		"res://assets/sprites/cutin/char_013.png",
 		"res://assets/sprites/cutin/char_014.png",
 	]
 	for p in paths:
@@ -70,7 +70,7 @@ func _build_and_animate() -> void:
 	var black := ColorRect.new()
 	black.size = Vector2(1920, 1080)
 	black.color = Color(0, 0, 0, 0)
-	black.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	black.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(black)
 
 	var bar := TextureRect.new()
@@ -183,49 +183,24 @@ func _show_buttons() -> void:
 	var left_x: float = (1920 - total_w) / 2.0
 	var btn_y: float = 880.0
 
-	var btn_retry := TextureButton.new()
-	btn_retry.texture_normal = tex_retry
-	btn_retry.ignore_texture_size = true
-	btn_retry.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
+	var btn_retry := HoverButton.create(tex_retry, Vector2(btn_w, btn_h))
 	btn_retry.position = Vector2(left_x, btn_y)
-	btn_retry.custom_minimum_size = Vector2(btn_w, btn_h)
-	btn_retry.size = Vector2(btn_w, btn_h)
 	btn_retry.modulate.a = 0
 	btn_retry.pressed.connect(func():
 		GameManager.play_click_se()
 		retry_requested.emit()
 	)
-	btn_retry.mouse_entered.connect(_on_btn_hover.bind(btn_retry))
-	btn_retry.mouse_exited.connect(_on_btn_unhover.bind(btn_retry))
 	add_child(btn_retry)
 
-	var btn_next := TextureButton.new()
-	btn_next.texture_normal = tex_next
-	btn_next.ignore_texture_size = true
-	btn_next.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
+	var btn_next := HoverButton.create(tex_next, Vector2(btn_w, btn_h))
 	btn_next.position = Vector2(left_x + btn_w + gap, btn_y)
-	btn_next.custom_minimum_size = Vector2(btn_w, btn_h)
-	btn_next.size = Vector2(btn_w, btn_h)
 	btn_next.modulate.a = 0
 	btn_next.pressed.connect(func():
 		GameManager.play_click_se()
 		next_requested.emit()
 	)
-	btn_next.mouse_entered.connect(_on_btn_hover.bind(btn_next))
-	btn_next.mouse_exited.connect(_on_btn_unhover.bind(btn_next))
 	add_child(btn_next)
 
 	var tw := create_tween().set_parallel(true)
 	tw.tween_property(btn_retry, "modulate:a", 1.0, 0.3)
 	tw.tween_property(btn_next, "modulate:a", 1.0, 0.3)
-
-
-func _on_btn_hover(btn: TextureButton) -> void:
-	GameManager.play_hover_se()
-	var tw := create_tween()
-	tw.tween_property(btn, "self_modulate", Color(1.4, 1.4, 1.4, 1.0), 0.12)
-
-
-func _on_btn_unhover(btn: TextureButton) -> void:
-	var tw := create_tween()
-	tw.tween_property(btn, "self_modulate", Color(1.0, 1.0, 1.0, 1.0), 0.12)

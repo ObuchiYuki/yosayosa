@@ -37,5 +37,13 @@ func _on_stage_button_pressed(stage_num: int) -> void:
 	GameManager.change_scene("res://scenes/game_stage.tscn")
 
 
+func _on_sample_novel_pressed() -> void:
+	GameManager.change_scene("res://scenes/sample_novel.tscn")
+
+
+func _on_intro_novel_pressed() -> void:
+	GameManager.change_scene("res://scenes/intro_novel.tscn")
+
+
 func _on_back_button_pressed() -> void:
 	GameManager.change_scene("res://scenes/title_screen.tscn")

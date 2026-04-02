@@ -89,6 +89,21 @@ text = "Stage 5: 総合"
 [node name="Separator2" type="HSeparator" parent="VBoxContainer"]
 layout_mode = 2
 
+[node name="SampleNovelButton" type="Button" parent="VBoxContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 48)
+theme_override_font_sizes/font_size = 20
+text = "サンプルノベル"
+
+[node name="IntroNovelButton" type="Button" parent="VBoxContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 48)
+theme_override_font_sizes/font_size = 20
+text = "導入ストーリー"
+
+[node name="Separator3" type="HSeparator" parent="VBoxContainer"]
+layout_mode = 2
+
 [node name="BackButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
 custom_minimum_size = Vector2(0, 48)
@@ -100,4 +115,6 @@ text = "もどる"
 [connection signal="pressed" from="VBoxContainer/Stage3Button" to="." method="_on_stage_button_pressed" binds= [3]]
 [connection signal="pressed" from="VBoxContainer/Stage4Button" to="." method="_on_stage_button_pressed" binds= [4]]
 [connection signal="pressed" from="VBoxContainer/Stage5Button" to="." method="_on_stage_button_pressed" binds= [5]]
+[connection signal="pressed" from="VBoxContainer/SampleNovelButton" to="." method="_on_sample_novel_pressed"]
+[connection signal="pressed" from="VBoxContainer/IntroNovelButton" to="." method="_on_intro_novel_pressed"]
 [connection signal="pressed" from="VBoxContainer/BackButton" to="." method="_on_back_button_pressed"]
