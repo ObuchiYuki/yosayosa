@@ -138,18 +138,22 @@ func _input(event: InputEvent) -> void:
 func _set_hover(index: int) -> void:
 	if hovered >= 0 and hovered < cmd_trs.size():
 		cmd_trs[hovered].texture = cmd_normal[hovered]
+	var prev_hovered := hovered
 	hovered = index
 	if hovered >= 0 and hovered < cmd_trs.size():
 		cmd_trs[hovered].texture = cmd_red[hovered]
+	if hovered >= 0 and hovered != prev_hovered:
+		GameManager.play_hover_se()
 
 
 func _on_cmd_pressed(index: int) -> void:
+	GameManager.play_click_se()
 	match index:
 		0:  # はじめる → デバッグメニュー
-			get_tree().change_scene_to_file("res://scenes/debug_menu.tscn")
+			GameManager.change_scene("res://scenes/debug_menu.tscn")
 		1:  # ギャラリー
-			get_tree().change_scene_to_file("res://scenes/blank_screen.tscn")
+			GameManager.change_scene("res://scenes/blank_screen.tscn")
 		2:  # オプション
-			get_tree().change_scene_to_file("res://scenes/blank_screen.tscn")
+			GameManager.change_scene("res://scenes/blank_screen.tscn")
 		3:  # おわる
 			get_tree().quit()

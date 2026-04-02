@@ -1,6 +1,6 @@
 extends Node2D
 
-## メインゲームステージ — 描画・入力・物理をすべて管理
+## メインゲームステージ — 描画・入力・発射を管理
 
 # ==================== テクスチャ ====================
 var tex_template := preload("res://assets/sprites/stage_template.png")
@@ -14,16 +14,6 @@ var tex_guide: Texture2D
 var tex_mirror_sign: Texture2D
 var tex_retry_icon := preload("res://assets/sprites/retry_icon.png")
 var tex_settings_icon := preload("res://assets/sprites/settings_icon.png")
-
-# カットイン用 (遅延ロード)
-var _cutin_loaded: bool = false
-var _tex_cutin_bar: Texture2D
-var _tex_success_text: Texture2D
-var _tex_exclaim: Texture2D
-var _cutin_char_frames: Array[Texture2D] = []
-var _cutin_layer: CanvasLayer = null
-var _cutin_char_sp: Sprite2D = null
-var _cutin_frame_idx: int = 0
 
 var light_anim_frames: Array[Texture2D] = []
 
@@ -49,18 +39,12 @@ var start_sprite: Sprite2D
 var guide_sprite: Sprite2D
 var light_trail: Line2D
 var particle_trail: GPUParticles2D
+var particle_trail_outer: GPUParticles2D
 var ui_layer: CanvasLayer
 var stage_label: Label
 var inv_visuals: Array[Sprite2D] = []
 var flash_overlay: ColorRect
 var motion_blur_sprites: Array[Sprite2D] = []
-
-var result_panel: Control
-var result_bg: ColorRect
-var result_label: Label
-var retry_btn: Button
-var next_btn: Button
-var menu_btn: Button
 
 # ==================== ステート ====================
 enum St { IDLE, AIMING, DRAGGING }
@@ -70,8 +54,10 @@ var held_mirror: Sprite2D = null
 var is_shooting: bool = false
 var light_path: Array[Vector2] = []
 var path_index: int = 0
-var player_speed: float = 4000.0
+const LIGHT_SPEED: float = 8000.0
+var player_speed: float = LIGHT_SPEED
 var path_hits_goal: bool = false
+var _result_active: bool = false
 
 var stage_data: Dictionary
 var wall_rects: Array[Rect2] = []
@@ -102,6 +88,16 @@ var bgm_player: AudioStreamPlayer
 var se_shoot_player: AudioStreamPlayer
 var se_reflect_player: AudioStreamPlayer
 var _sounded_bounce_indices: Array[int] = []
+
+# ==================== カットイン ====================
+var _clear_cutin: ClearCutin
+var _fail_cutin: FailCutin
+
+# ==================== 衝突アニメーション ====================
+var _collision_sp: Sprite2D = null
+var _collision_frames: Array[Texture2D] = []
+var _collision_frame_idx: int = 0
+var _collision_looping: bool = false
 
 
 # ==================== 初期化 ====================
@@ -199,11 +195,9 @@ func _build_scene() -> void:
 		_create_placed_mirror(
 			GameManager.grid_to_world(fm_pos.x, fm_pos.y), fm_angle, true)
 
-	# エフェクト用レイヤー
 	effects_layer = Node2D.new()
 	add_child(effects_layer)
 
-	# プレイヤー（1.5倍サイズ）
 	player_sprite = Sprite2D.new()
 	player_sprite.texture = tex_player
 	player_sprite.position = start_pos
@@ -212,7 +206,6 @@ func _build_scene() -> void:
 	player_sprite.scale = player_base_scale
 	add_child(player_sprite)
 
-	# モーションブラー用ゴーストスプライト
 	for i in range(MOTION_BLUR_COUNT):
 		var ghost := Sprite2D.new()
 		ghost.texture = tex_player
@@ -229,17 +222,14 @@ func _build_scene() -> void:
 	guide_sprite.rotation = aim_direction.angle() + PI / 2.0
 	add_child(guide_sprite)
 
-	# 光線 (パーティクルが主体なので補助的に薄く)
 	light_trail = Line2D.new()
-	light_trail.width = 2.0
-	light_trail.default_color = Color(1.0, 0.95, 0.6, 0.35)
+	light_trail.width = 1.4
+	light_trail.default_color = Color(1.0, 0.95, 0.62, 0.5)
 	add_child(light_trail)
 
-	# 軌跡スパークルコンテナ
 	trail_sparkle_container = Node2D.new()
 	add_child(trail_sparkle_container)
 
-	# 光線パーティクル
 	_setup_trail_particles()
 
 	_build_ui()
@@ -248,30 +238,56 @@ func _build_scene() -> void:
 func _setup_trail_particles() -> void:
 	particle_trail = GPUParticles2D.new()
 	particle_trail.emitting = false
-	particle_trail.amount = 40
-	particle_trail.lifetime = 0.6
+	particle_trail.amount = 26
+	particle_trail.lifetime = 0.12
 
 	var mat := ParticleProcessMaterial.new()
 	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
-	mat.emission_sphere_radius = 8.0
+	mat.emission_sphere_radius = 0.8
 	mat.direction = Vector3(0, 0, 0)
-	mat.spread = 180.0
-	mat.initial_velocity_min = 20.0
-	mat.initial_velocity_max = 60.0
+	mat.spread = 6.0
+	mat.initial_velocity_min = 4.0
+	mat.initial_velocity_max = 12.0
 	mat.gravity = Vector3.ZERO
-	mat.scale_min = 2.0
-	mat.scale_max = 5.0
-	mat.color = Color(1.0, 0.95, 0.4, 1.0)
+	mat.scale_min = 1.8
+	mat.scale_max = 3.0
+	mat.color = Color(1.0, 0.96, 0.62, 1.0)
+	mat.hue_variation_min = -0.03
+	mat.hue_variation_max = 0.03
 
 	var color_ramp := Gradient.new()
-	color_ramp.set_color(0, Color(1.0, 1.0, 0.6, 1.0))
-	color_ramp.set_color(1, Color(1.0, 0.8, 0.2, 0.0))
+	color_ramp.set_color(0, Color(1.0, 0.99, 0.8, 0.95))
+	color_ramp.set_color(1, Color(1.0, 0.88, 0.42, 0.0))
 	var color_tex := GradientTexture1D.new()
 	color_tex.gradient = color_ramp
 	mat.color_ramp = color_tex
 
 	particle_trail.process_material = mat
 	add_child(particle_trail)
+
+	# 外周の散りを別レイヤーで少量だけ足して、中央太めのレーザー感を出す
+	particle_trail_outer = GPUParticles2D.new()
+	particle_trail_outer.emitting = false
+	particle_trail_outer.amount = 8
+	particle_trail_outer.lifetime = 0.1
+
+	var outer_mat := ParticleProcessMaterial.new()
+	outer_mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	outer_mat.emission_sphere_radius = 1.6
+	outer_mat.direction = Vector3(0, 0, 0)
+	outer_mat.spread = 20.0
+	outer_mat.initial_velocity_min = 8.0
+	outer_mat.initial_velocity_max = 20.0
+	outer_mat.gravity = Vector3.ZERO
+	outer_mat.scale_min = 0.7
+	outer_mat.scale_max = 1.4
+	outer_mat.color = Color(1.0, 0.94, 0.58, 0.9)
+	outer_mat.hue_variation_min = -0.04
+	outer_mat.hue_variation_max = 0.04
+	outer_mat.color_ramp = color_tex
+
+	particle_trail_outer.process_material = outer_mat
+	add_child(particle_trail_outer)
 
 
 func _create_floor() -> void:
@@ -453,7 +469,9 @@ func _build_ui() -> void:
 	add_child(ui_layer)
 
 	stage_label = Label.new()
-	stage_label.text = "STAGE %d: %s" % [GameManager.current_stage, str(stage_data.name)]
+	stage_label.text = "STAGE %d: %s [%s]" % [
+		GameManager.current_stage, str(stage_data.name), GameManager.stage_size_label()
+	]
 	stage_label.position = Vector2(GameManager.STAGE_X + GameManager.STAGE_W / 2.0 - 100, 10)
 	stage_label.add_theme_font_size_override("font_size", 28)
 	stage_label.add_theme_color_override("font_color", Color.WHITE)
@@ -461,7 +479,6 @@ func _build_ui() -> void:
 
 	_build_inventory()
 	_build_bottom_icons()
-	_build_result_overlay()
 
 	flash_overlay = ColorRect.new()
 	flash_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -476,7 +493,7 @@ func _build_inventory() -> void:
 
 	var inv_bg := ColorRect.new()
 	inv_bg.position = Vector2(GameManager.INV_X, GameManager.INV_Y)
-	var inv_icon_reserved: float = 70 + 24 + 24  # icon + gap_above + padding
+	var inv_icon_reserved: float = 70 + 24 + 24
 	inv_bg.size = Vector2(GameManager.INV_W, GameManager.INV_H - inv_icon_reserved)
 	inv_bg.color = Color("786D5C")
 	inv_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -512,6 +529,8 @@ func _build_bottom_icons() -> void:
 	settings_icon.custom_minimum_size = Vector2(icon_size, icon_size)
 	settings_icon.size = Vector2(icon_size, icon_size)
 	settings_icon.pressed.connect(_on_settings)
+	settings_icon.mouse_entered.connect(GameManager.play_hover_se)
+	settings_icon.pressed.connect(GameManager.play_click_se)
 	ui_layer.add_child(settings_icon)
 
 	var retry_icon := TextureButton.new()
@@ -522,281 +541,165 @@ func _build_bottom_icons() -> void:
 	retry_icon.custom_minimum_size = Vector2(icon_size, icon_size)
 	retry_icon.size = Vector2(icon_size, icon_size)
 	retry_icon.pressed.connect(reset_stage)
+	retry_icon.mouse_entered.connect(GameManager.play_hover_se)
+	retry_icon.pressed.connect(GameManager.play_click_se)
 	ui_layer.add_child(retry_icon)
 
 
-func _build_result_overlay() -> void:
-	result_panel = Control.new()
-	result_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	result_panel.visible = false
-	result_panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	ui_layer.add_child(result_panel)
-
-	result_bg = ColorRect.new()
-	result_bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	result_bg.color = Color(0, 0, 0, 0.75)
-	result_panel.add_child(result_bg)
-
-	var vbox := VBoxContainer.new()
-	vbox.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	vbox.offset_left = -120
-	vbox.offset_top = -100
-	vbox.offset_right = 120
-	vbox.offset_bottom = 100
-	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	vbox.add_theme_constant_override("separation", 20)
-	result_panel.add_child(vbox)
-
-	result_label = Label.new()
-	result_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	result_label.add_theme_font_size_override("font_size", 48)
-	vbox.add_child(result_label)
-
-	retry_btn = Button.new()
-	retry_btn.text = "リトライ"
-	retry_btn.pressed.connect(reset_stage)
-	vbox.add_child(retry_btn)
-
-	next_btn = Button.new()
-	next_btn.text = "次のステージ"
-	next_btn.pressed.connect(_on_next_stage)
-	vbox.add_child(next_btn)
-
-	menu_btn = Button.new()
-	menu_btn.text = "メニューへ"
-	menu_btn.pressed.connect(_on_back)
-	vbox.add_child(menu_btn)
-
+# ==================== 結果表示 ====================
 
 func _show_result(success: bool) -> void:
+	_result_active = true
 	is_shooting = false
 	trail_drawing = false
 	particle_trail.emitting = false
+	particle_trail_outer.emitting = false
 	_hide_motion_blur()
 	player_sprite.rotation = 0
+	bgm_player.stop()
+
 	if success:
-		_play_clear_cutin()
-		return
-	result_panel.visible = true
-	result_label.text = "失敗…"
-	result_label.add_theme_color_override("font_color", Color(1.0, 0.3, 0.2))
-	result_bg.color = Color(0.15, 0, 0, 0.8)
-	next_btn.visible = false
+		_clear_cutin = ClearCutin.new()
+		add_child(_clear_cutin)
+		_clear_cutin.retry_requested.connect(reset_stage)
+		_clear_cutin.next_requested.connect(_on_next_stage)
+		_clear_cutin.play()
+	else:
+		player_sprite.visible = false
+		_start_collision_anim()
 
 
-# ==================== クリアカットイン ====================
+func _get_impact_direction() -> String:
+	if light_path.size() < 2:
+		return "down"
 
-func _load_cutin_assets() -> void:
-	if _cutin_loaded:
-		return
-	_cutin_loaded = true
-	_tex_cutin_bar = load("res://assets/sprites/cutin/cutin_bar.png")
-	_tex_success_text = load("res://assets/sprites/cutin/success_text.png")
-	_tex_exclaim = load("res://assets/sprites/cutin/exclaim.png")
+	var impact: Vector2 = light_path[-1]
+	var threshold: float = 8.0
 
-	var paths: Array[String] = [
-		"res://assets/sprites/cutin/char_001.png",
-		"res://assets/sprites/cutin/char_002.png",
-		"res://assets/sprites/cutin/char_003.png",
-		"res://assets/sprites/cutin/char_004.png",
-		"res://assets/sprites/cutin/char_005.png",
-		"res://assets/sprites/cutin/char_006.png",
-		"res://assets/sprites/cutin/char_007.png",
-		"res://assets/sprites/cutin/char_008.png",
-		"res://assets/sprites/cutin/char_009.png",
-		"res://assets/sprites/cutin/char_010.png",
-		"res://assets/sprites/cutin/char_011.png",
-		"res://assets/sprites/cutin/char_012_jito.png",
-		"res://assets/sprites/cutin/char_012_open.png",
-		"res://assets/sprites/cutin/char_012_close.png",
-		"res://assets/sprites/cutin/char_012_jito.png",
-		"res://assets/sprites/cutin/char_012_open.png",
-		"res://assets/sprites/cutin/char_012_close.png",
-		"res://assets/sprites/cutin/char_013.png",
-		"res://assets/sprites/cutin/char_013_5.png",
-		"res://assets/sprites/cutin/char_014.png",
-	]
-	for p in paths:
-		var tex: Texture2D = load(p)
+	var sx: float = GameManager.STAGE_X
+	var sy: float = GameManager.STAGE_Y
+	var sx2: float = sx + GameManager.STAGE_W
+	var sy2: float = sy + GameManager.STAGE_H
+
+	if abs(impact.y - sy) <= threshold:
+		return "up"
+	if abs(impact.y - sy2) <= threshold:
+		return "down"
+	if abs(impact.x - sx) <= threshold:
+		return "left"
+	if abs(impact.x - sx2) <= threshold:
+		return "right"
+
+	var min_dist: float = INF
+	var direction: String = "down"
+	for rect in wall_rects:
+		var in_x: bool = impact.x >= rect.position.x - threshold and impact.x <= rect.end.x + threshold
+		var in_y: bool = impact.y >= rect.position.y - threshold and impact.y <= rect.end.y + threshold
+		if in_x:
+			var dt: float = abs(impact.y - rect.position.y)
+			if dt < min_dist:
+				min_dist = dt
+				direction = "down"
+			var db: float = abs(impact.y - rect.end.y)
+			if db < min_dist:
+				min_dist = db
+				direction = "up"
+		if in_y:
+			var dl: float = abs(impact.x - rect.position.x)
+			if dl < min_dist:
+				min_dist = dl
+				direction = "right"
+			var dr: float = abs(impact.x - rect.end.x)
+			if dr < min_dist:
+				min_dist = dr
+				direction = "left"
+
+	if min_dist <= threshold:
+		return direction
+
+	var last_dir: Vector2 = (light_path[-1] - light_path[-2]).normalized()
+	if abs(last_dir.x) > abs(last_dir.y):
+		return "right" if last_dir.x > 0 else "left"
+	return "down" if last_dir.y > 0 else "up"
+
+
+func _start_collision_anim() -> void:
+	var direction: String = _get_impact_direction()
+	_collision_frames.clear()
+	for i in range(1, 7):
+		var path: String = "res://assets/sprites/collision/collision_%s_%03d.png" % [direction, i]
+		var tex: Texture2D = load(path)
 		if tex:
-			_cutin_char_frames.append(tex)
-
-
-func _play_clear_cutin() -> void:
-	_load_cutin_assets()
-
-	# ゲーム入力をブロック (result_panel.visibleで_inputが即return)
-	result_panel.visible = true
-	result_bg.color = Color(0, 0, 0, 0)
-	result_label.text = ""
-	retry_btn.visible = false
-	next_btn.visible = false
-	menu_btn.visible = false
-
-	_cutin_layer = CanvasLayer.new()
-	_cutin_layer.layer = 10
-	add_child(_cutin_layer)
-
-	# 50%黒オーバーレイ
-	var black := ColorRect.new()
-	black.size = Vector2(1920, 1080)
-	black.color = Color(0, 0, 0, 0)
-	black.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_cutin_layer.add_child(black)
-
-	# カットインバー (右から出現)
-	var bar := TextureRect.new()
-	bar.texture = _tex_cutin_bar
-	bar.size = Vector2(1920, 1080)
-	bar.stretch_mode = TextureRect.STRETCH_SCALE
-	bar.position = Vector2(200, 0)
-	bar.modulate.a = 0
-	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_cutin_layer.add_child(bar)
-
-	# エンブレム (カットインバーの上、テキストの下)
-	var emblem_sp := Sprite2D.new()
-	emblem_sp.texture = load("res://assets/sprites/cutin/emblem.png")
-	emblem_sp.position = Vector2(960, 540)
-	emblem_sp.scale = Vector2(0.75, 0.75)
-	emblem_sp.modulate.a = 0
-	emblem_sp.visible = false
-	_cutin_layer.add_child(emblem_sp)
-
-	# SUCCESS テキスト (画面中央X, 下から1/4) → 右100px, 上100px オフセット
-	var success_sp := Sprite2D.new()
-	success_sp.texture = _tex_success_text
-	success_sp.position = Vector2(1060, 710)
-	success_sp.scale = Vector2.ZERO
-	success_sp.visible = false
-	_cutin_layer.add_child(success_sp)
-
-	# びっくりマーク (同じ位置) → 右100px, 上100px オフセット
-	var exclaim_sp := Sprite2D.new()
-	exclaim_sp.texture = _tex_exclaim
-	exclaim_sp.position = Vector2(1060, 710)
-	exclaim_sp.modulate.a = 0
-	exclaim_sp.visible = false
-	_cutin_layer.add_child(exclaim_sp)
-
-	# キャラクタースプライト (画面中央)
-	var char_sp := Sprite2D.new()
-	char_sp.position = Vector2(960, 540)
-	var char_sc: float = 1080.0 / 2000.0 * 0.85
-	char_sp.scale = Vector2(char_sc, char_sc)
-	char_sp.visible = false
-	_cutin_layer.add_child(char_sp)
-
-	# --- アニメーション構築 ---
-	var tw := create_tween()
-
-	# Phase 1: 黒フェード + バースライド (0.2s, 同時)
-	tw.tween_property(black, "color:a", 0.5, 0.2)
-	tw.parallel().tween_property(bar, "modulate:a", 1.0, 0.2)
-	tw.parallel().tween_property(bar, "position:x", 0.0, 0.2) \
-		.set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
-
-	# Phase 2: SUCCESS バウンススケール (0.25s) — 最終1.5倍
-	tw.tween_callback(func(): success_sp.visible = true)
-	tw.tween_property(success_sp, "scale", Vector2(2.25, 2.25), 0.12) \
-		.set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
-	tw.tween_property(success_sp, "scale", Vector2(1.5, 1.5), 0.13) \
-		.set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BOUNCE)
-
-	# Phase 3: びっくりフェードイン (0.1s) + 上にバウンス (0.2s) — 1.5倍
-	tw.tween_callback(func(): exclaim_sp.visible = true)
-	tw.tween_property(exclaim_sp, "modulate:a", 1.0, 0.1)
-	tw.tween_property(exclaim_sp, "scale", Vector2(1.5, 1.5), 0.0)
-	tw.tween_property(exclaim_sp, "position:y", 680.0, 0.1) \
-		.set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
-	tw.tween_property(exclaim_sp, "position:y", 710.0, 0.1) \
-		.set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BOUNCE)
-
-	# Phase 3.5: エンブレムフェードイン → 0.2s待機
-	tw.tween_callback(func(): emblem_sp.visible = true)
-	tw.tween_property(emblem_sp, "modulate:a", 1.0, 0.3) \
-		.set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
-	tw.tween_interval(0.2)
-
-	# Phase 4: キャラアニメーション開始
-	tw.tween_callback(_start_cutin_char_anim.bind(char_sp))
-
-
-func _start_cutin_char_anim(sp: Sprite2D) -> void:
-	sp.visible = true
-	_cutin_char_sp = sp
-	_cutin_frame_idx = 0
-	_advance_cutin_frame()
-
-
-func _advance_cutin_frame() -> void:
-	if _cutin_frame_idx >= _cutin_char_frames.size():
-		get_tree().create_timer(0.5).timeout.connect(_on_cutin_done)
+			_collision_frames.append(tex)
+	if _collision_frames.is_empty():
+		_show_fail_cutin()
 		return
-	_cutin_char_sp.texture = _cutin_char_frames[_cutin_frame_idx]
-	var is_012 := _cutin_frame_idx >= 11 and _cutin_frame_idx <= 16
-	var delay := 0.16 if is_012 else 0.08
-	_cutin_frame_idx += 1
-	get_tree().create_timer(delay).timeout.connect(_advance_cutin_frame)
+
+	_collision_sp = Sprite2D.new()
+	_collision_sp.texture = _collision_frames[0]
+
+	var tex_w: float = _collision_sp.texture.get_width()
+	var tex_h: float = _collision_sp.texture.get_height()
+	var cw: float = GameManager.cell_width()
+	var ch: float = GameManager.cell_height()
+	var sc: float = minf(cw / tex_w, ch / tex_h)
+	_collision_sp.scale = Vector2(sc, sc)
+
+	var half_w: float = tex_w * sc / 2.0
+	var half_h: float = tex_h * sc / 2.0
+	var wall_pt: Vector2 = light_path[-1]
+	var display_pos: Vector2
+
+	match direction:
+		"right":
+			display_pos = Vector2(wall_pt.x - half_w, wall_pt.y)
+		"left":
+			display_pos = Vector2(wall_pt.x + half_w, wall_pt.y)
+		"down":
+			display_pos = Vector2(wall_pt.x, wall_pt.y - half_h)
+		"up":
+			display_pos = Vector2(wall_pt.x, wall_pt.y + half_h - ch)
+		_:
+			display_pos = wall_pt
+
+	_collision_sp.position = display_pos
+	add_child(_collision_sp)
+
+	_collision_frame_idx = 0
+	_collision_looping = false
+	_advance_collision_frame()
 
 
-func _on_cutin_done() -> void:
-	var tex_retry: Texture2D = load("res://assets/sprites/cutin/btn_retry.png")
-	var tex_next: Texture2D = load("res://assets/sprites/cutin/btn_next.png")
+func _advance_collision_frame() -> void:
+	if not is_instance_valid(_collision_sp):
+		return
 
-	var sc := 0.75
-	var btn_w: float = 670 * sc
-	var btn_h: float = 136 * sc
-	var gap := 32.0
-	var total_w: float = btn_w * 2 + gap
-	var left_x: float = (1920 - total_w) / 2.0
-	var btn_y: float = 880.0
+	_collision_sp.texture = _collision_frames[_collision_frame_idx]
 
-	var btn_retry := TextureButton.new()
-	btn_retry.texture_normal = tex_retry
-	btn_retry.ignore_texture_size = true
-	btn_retry.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
-	btn_retry.position = Vector2(left_x, btn_y)
-	btn_retry.custom_minimum_size = Vector2(btn_w, btn_h)
-	btn_retry.size = Vector2(btn_w, btn_h)
-	btn_retry.modulate.a = 0
-	btn_retry.pressed.connect(reset_stage)
-	btn_retry.mouse_entered.connect(_btn_hover_enter.bind(btn_retry))
-	btn_retry.mouse_exited.connect(_btn_hover_exit.bind(btn_retry))
-	_cutin_layer.add_child(btn_retry)
-
-	var btn_next := TextureButton.new()
-	btn_next.texture_normal = tex_next
-	btn_next.ignore_texture_size = true
-	btn_next.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
-	btn_next.position = Vector2(left_x + btn_w + gap, btn_y)
-	btn_next.custom_minimum_size = Vector2(btn_w, btn_h)
-	btn_next.size = Vector2(btn_w, btn_h)
-	btn_next.modulate.a = 0
-	btn_next.pressed.connect(_on_next_stage)
-	btn_next.mouse_entered.connect(_btn_hover_enter.bind(btn_next))
-	btn_next.mouse_exited.connect(_btn_hover_exit.bind(btn_next))
-	_cutin_layer.add_child(btn_next)
-
-	var tw := create_tween().set_parallel(true)
-	tw.tween_property(btn_retry, "modulate:a", 1.0, 0.3)
-	tw.tween_property(btn_next, "modulate:a", 1.0, 0.3)
+	if _collision_frame_idx < 4:
+		_collision_frame_idx += 1
+		var delay: float = 0.35
+		get_tree().create_timer(delay).timeout.connect(_advance_collision_frame)
+		if _collision_frame_idx == 4:
+			_show_fail_cutin()
+	else:
+		_collision_looping = true
+		_collision_frame_idx = 4 if _collision_frame_idx == 5 else 5
+		get_tree().create_timer(0.5).timeout.connect(_advance_collision_frame)
 
 
-func _btn_hover_enter(btn: TextureButton) -> void:
-	var tw := create_tween()
-	tw.tween_property(btn, "self_modulate", Color(1.4, 1.4, 1.4, 1.0), 0.12)
-
-
-func _btn_hover_exit(btn: TextureButton) -> void:
-	var tw := create_tween()
-	tw.tween_property(btn, "self_modulate", Color(1.0, 1.0, 1.0, 1.0), 0.12)
+func _show_fail_cutin() -> void:
+	_fail_cutin = FailCutin.new()
+	add_child(_fail_cutin)
+	_fail_cutin.retry_requested.connect(reset_stage)
+	_fail_cutin.title_requested.connect(_on_title)
+	_fail_cutin.play()
 
 
 # ==================== 入力 ====================
 
 func _input(event: InputEvent) -> void:
-	if result_panel.visible:
+	if _result_active:
 		return
 	if is_shooting:
 		return
@@ -977,7 +880,16 @@ func _hide_motion_blur() -> void:
 # ==================== 発射・移動 ====================
 
 func _start_shooting() -> void:
-	var result := _calc_light_path(player_sprite.position, aim_direction)
+	var mirrors_data: Array = []
+	for child: Node in mirrors_layer.get_children():
+		var m: Sprite2D = child as Sprite2D
+		mirrors_data.append({
+			"position": m.position,
+			"angle_deg": m.get_meta("angle_deg"),
+		})
+	var result := LightCalculator.calc_light_path(
+		player_sprite.position, aim_direction,
+		goal_sprite.position, mirrors_data, wall_rects)
 	light_path = result.path
 	path_hits_goal = result.hits_goal
 	if light_path.size() < 2:
@@ -1022,50 +934,28 @@ func _process(delta: float) -> void:
 
 	if trail_drawing:
 		_advance_trail(delta)
-		return
-
-	if path_index >= light_path.size() - 1:
-		_on_path_end()
-		return
-
-	var target := light_path[path_index + 1]
-	var dir := (target - player_sprite.position).normalized()
-	var dist := player_sprite.position.distance_to(target)
-	var step := player_speed * delta
-
-	# パーティクル追従
-	particle_trail.emitting = true
-	particle_trail.position = player_sprite.position
-
-	if step >= dist:
-		player_sprite.position = target
-		_update_motion_blur(dir)
-		path_index += 1
-		if target in bounce_points:
-			_trigger_flash(0.3)
-			_spawn_light_anim(target)
-		if path_index >= light_path.size() - 1:
-			_on_path_end()
-			return
-	else:
-		player_sprite.position += dir * step
-		_update_motion_blur(dir)
-		particle_trail.position = player_sprite.position
 
 
 func _advance_trail(delta: float) -> void:
-	var draw_speed: float = 8000.0
+	var draw_speed: float = LIGHT_SPEED
 	trail_draw_progress += draw_speed * delta
 
 	light_trail.clear_points()
 	var accumulated: float = 0.0
 	light_trail.add_point(light_path[0])
+	var head_pos: Vector2 = light_path[0]
+	var head_dir: Vector2 = aim_direction
+
+	particle_trail.emitting = true
+	particle_trail_outer.emitting = true
 
 	for i in range(light_path.size() - 1):
 		var seg_len: float = light_path[i].distance_to(light_path[i + 1])
 		if accumulated + seg_len <= trail_draw_progress:
 			accumulated += seg_len
 			light_trail.add_point(light_path[i + 1])
+			head_pos = light_path[i + 1]
+			head_dir = (light_path[i + 1] - light_path[i]).normalized()
 			if light_path[i + 1] in bounce_points:
 				var bp_idx := bounce_points.find(light_path[i + 1])
 				if bp_idx >= 0 and bp_idx not in _sounded_bounce_indices:
@@ -1078,9 +968,15 @@ func _advance_trail(delta: float) -> void:
 			var t: float = remain / seg_len
 			var interp: Vector2 = light_path[i].lerp(light_path[i + 1], t)
 			light_trail.add_point(interp)
+			head_pos = interp
+			head_dir = (light_path[i + 1] - light_path[i]).normalized()
 			break
 
-	# スパークルを等間隔で生成
+	player_sprite.position = head_pos
+	_update_motion_blur(head_dir)
+	particle_trail.position = head_pos
+	particle_trail_outer.position = head_pos
+
 	while _trail_sparkle_dist + SPARKLE_INTERVAL <= trail_draw_progress:
 		_trail_sparkle_dist += SPARKLE_INTERVAL
 		var sp := _pos_at_distance(_trail_sparkle_dist)
@@ -1088,8 +984,11 @@ func _advance_trail(delta: float) -> void:
 
 	if trail_draw_progress >= trail_total_length:
 		trail_drawing = false
-		player_sprite.position = light_path[0]
+		player_sprite.position = light_path[light_path.size() - 1]
+		particle_trail.position = player_sprite.position
+		particle_trail_outer.position = player_sprite.position
 		_start_trail_fade()
+		_on_path_end()
 
 
 func _trigger_flash(intensity: float) -> void:
@@ -1099,160 +998,26 @@ func _trigger_flash(intensity: float) -> void:
 func _on_path_end() -> void:
 	is_shooting = false
 	particle_trail.emitting = false
+	particle_trail_outer.emitting = false
 	_hide_motion_blur()
 	_show_result(path_hits_goal)
-
-
-# ==================== 光路計算 ====================
-
-func _calc_light_path(start: Vector2, dir: Vector2) -> Dictionary:
-	var path: Array[Vector2] = [start]
-	var pos := start
-	var d := dir.normalized()
-	var hits_goal: bool = false
-
-	for _i in range(30):
-		var hit := _find_nearest_hit(pos, d)
-		path.append(hit.point)
-
-		if hit.type == "goal":
-			hits_goal = true
-			break
-		elif hit.type == "mirror":
-			pos = hit.point + hit.reflected * 2.0
-			d = hit.reflected
-		else:
-			break
-
-	return {"path": path, "hits_goal": hits_goal}
-
-
-func _find_nearest_hit(from: Vector2, dir: Vector2) -> Dictionary:
-	var nearest_dist: float = 3000.0
-	var result: Dictionary = {
-		"point": from + dir * nearest_dist,
-		"type": "none",
-		"normal": Vector2.ZERO,
-		"reflected": Vector2.ZERO,
-	}
-
-	var hit_radius: float = GameManager.cell_width() * 0.75
-	var gh := _hit_circle(from, dir, goal_sprite.position, hit_radius)
-	if gh.hit and gh.dist < nearest_dist:
-		nearest_dist = gh.dist
-		result = {"point": goal_sprite.position, "type": "goal", "normal": Vector2.ZERO, "reflected": Vector2.ZERO}
-
-	for child: Node in mirrors_layer.get_children():
-		var m: Sprite2D = child as Sprite2D
-		var mh := _hit_mirror(from, dir, m)
-		if mh.hit and mh.dist < nearest_dist and mh.dist > 2.0:
-			nearest_dist = mh.dist
-			if mh.reflects:
-				result = {"point": mh.point, "type": "mirror", "normal": mh.normal, "reflected": mh.reflected}
-			else:
-				result = {"point": mh.point, "type": "wall", "normal": mh.normal, "reflected": Vector2.ZERO}
-
-	for rect in wall_rects:
-		var wh := _hit_rect(from, dir, rect)
-		if wh.hit and wh.dist < nearest_dist:
-			nearest_dist = wh.dist
-			result = {"point": wh.point, "type": "wall", "normal": wh.normal, "reflected": Vector2.ZERO}
-
-	var sx: float = GameManager.STAGE_X
-	var sy: float = GameManager.STAGE_Y
-	var sx2: float = sx + GameManager.STAGE_W
-	var sy2: float = sy + GameManager.STAGE_H
-	var bounds: Array[Array] = [
-		[Vector2(sx, sy), Vector2(sx2, sy)],
-		[Vector2(sx2, sy), Vector2(sx2, sy2)],
-		[Vector2(sx2, sy2), Vector2(sx, sy2)],
-		[Vector2(sx, sy2), Vector2(sx, sy)],
-	]
-	for b in bounds:
-		var bh := _seg_intersect(from, from + dir * 3000.0, b[0], b[1])
-		if bh.hit and bh.dist < nearest_dist:
-			nearest_dist = bh.dist
-			result = {"point": bh.point, "type": "wall", "normal": Vector2.ZERO, "reflected": Vector2.ZERO}
-
-	return result
-
-
-# ==================== 衝突判定ヘルパー ====================
-
-func _hit_circle(from: Vector2, dir: Vector2, center: Vector2, radius: float) -> Dictionary:
-	var to_c := center - from
-	var proj := to_c.dot(dir)
-	if proj < 0:
-		return {"hit": false, "point": Vector2.ZERO, "dist": INF}
-	var closest := from + dir * proj
-	var d := closest.distance_to(center)
-	if d > radius:
-		return {"hit": false, "point": Vector2.ZERO, "dist": INF}
-	var half := sqrt(radius * radius - d * d)
-	var hit_d := proj - half
-	if hit_d < 0:
-		hit_d = proj + half
-	return {"hit": true, "point": from + dir * hit_d, "dist": hit_d}
-
-
-func _hit_mirror(from: Vector2, dir: Vector2, m: Sprite2D) -> Dictionary:
-	var angle_deg: int = m.get_meta("angle_deg")
-	var mdir: Vector2 = GameManager.mirror_surface_dir(angle_deg)
-	var p1: Vector2 = m.position - mdir * GameManager.MIRROR_HALF_LEN
-	var p2: Vector2 = m.position + mdir * GameManager.MIRROR_HALF_LEN
-
-	var seg := _seg_intersect(from, from + dir * 3000.0, p1, p2)
-	if not seg.hit:
-		return {"hit": false, "point": Vector2.ZERO, "dist": INF, "reflects": false, "normal": Vector2.ZERO, "reflected": Vector2.ZERO}
-
-	var normal: Vector2 = GameManager.mirror_normal(angle_deg)
-	var dot := dir.dot(normal)
-	var reflects := dot < 0
-
-	var reflected := Vector2.ZERO
-	if reflects:
-		reflected = dir - 2.0 * dot * normal
-
-	return {"hit": true, "point": seg.point, "dist": seg.dist, "reflects": reflects, "normal": normal, "reflected": reflected}
-
-
-func _hit_rect(from: Vector2, dir: Vector2, rect: Rect2) -> Dictionary:
-	var edges: Array[Array] = [
-		[rect.position, Vector2(rect.end.x, rect.position.y), Vector2(0, -1)],
-		[Vector2(rect.end.x, rect.position.y), rect.end, Vector2(1, 0)],
-		[rect.end, Vector2(rect.position.x, rect.end.y), Vector2(0, 1)],
-		[Vector2(rect.position.x, rect.end.y), rect.position, Vector2(-1, 0)],
-	]
-	var best: Dictionary = {"hit": false, "point": Vector2.ZERO, "dist": INF, "normal": Vector2.ZERO}
-	for e in edges:
-		var h := _seg_intersect(from, from + dir * 3000.0, e[0], e[1])
-		if h.hit and h.dist < best.dist:
-			best = {"hit": true, "point": h.point, "dist": h.dist, "normal": e[2]}
-	return best
-
-
-func _seg_intersect(a1: Vector2, a2: Vector2, b1: Vector2, b2: Vector2) -> Dictionary:
-	var da := a2 - a1
-	var db := b2 - b1
-	var cross := da.x * db.y - da.y * db.x
-	if abs(cross) < 0.0001:
-		return {"hit": false, "point": Vector2.ZERO, "dist": INF}
-	var d := a1 - b1
-	var t := (db.x * d.y - db.y * d.x) / cross
-	var u := (da.x * d.y - da.y * d.x) / cross
-	if t >= 0.0 and t <= 1.0 and u >= 0.0 and u <= 1.0:
-		var pt := a1 + da * t
-		return {"hit": true, "point": pt, "dist": a1.distance_to(pt)}
-	return {"hit": false, "point": Vector2.ZERO, "dist": INF}
 
 
 # ==================== ナビゲーション ====================
 
 func reset_stage() -> void:
-	if _cutin_layer:
-		_cutin_layer.queue_free()
-		_cutin_layer = null
-	result_panel.visible = false
+	if _clear_cutin:
+		_clear_cutin.queue_free()
+		_clear_cutin = null
+	if _fail_cutin:
+		_fail_cutin.queue_free()
+		_fail_cutin = null
+	if _collision_sp and is_instance_valid(_collision_sp):
+		_collision_sp.queue_free()
+		_collision_sp = null
+	_collision_frames.clear()
+	_collision_looping = false
+	_result_active = false
 	is_shooting = false
 	trail_drawing = false
 	state = St.IDLE
@@ -1265,18 +1030,18 @@ func reset_stage() -> void:
 	guide_sprite.position = player_start_pos
 	flash_alpha = 0.0
 	flash_overlay.color = Color(1, 1, 1, 0)
+	player_sprite.visible = true
 	player_sprite.position = player_start_pos
 	player_sprite.rotation = 0
 	particle_trail.emitting = false
+	particle_trail_outer.emitting = false
 	_hide_motion_blur()
 	_press_mirror = null
 
-	# 軌跡スパークルクリア
 	for child in trail_sparkle_container.get_children():
 		child.queue_free()
 	_trail_sparkle_dist = 0.0
 
-	# エフェクトクリア
 	for child in effects_layer.get_children():
 		child.queue_free()
 
@@ -1303,18 +1068,24 @@ func reset_stage() -> void:
 		inv_count += 1
 
 	held_mirror = null
+	if not bgm_player.playing:
+		bgm_player.play()
 
 
 func _on_back() -> void:
-	get_tree().change_scene_to_file("res://scenes/debug_menu.tscn")
+	GameManager.change_scene("res://scenes/debug_menu.tscn")
 
 
 func _on_settings() -> void:
-	get_tree().change_scene_to_file("res://scenes/blank_screen.tscn")
+	GameManager.change_scene("res://scenes/blank_screen.tscn")
 
 
 func _on_next_stage() -> void:
 	GameManager.current_stage += 1
 	if GameManager.current_stage > 5:
 		GameManager.current_stage = 1
-	get_tree().reload_current_scene()
+	GameManager.reload_scene()
+
+
+func _on_title() -> void:
+	GameManager.change_scene("res://scenes/title_screen.tscn")

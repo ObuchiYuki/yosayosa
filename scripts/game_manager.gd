@@ -1,6 +1,6 @@
 extends Node
 
-## ゲーム全体の状態管理・定数・ステージデータ
+## ゲーム全体の状態管理・定数・ステージデータ・UI音声・シーン遷移
 
 # --- レイアウト定数 (ステージテンプレ.png に合わせる) ---
 const SCREEN_W: int = 1920
@@ -11,8 +11,12 @@ const STAGE_Y: int = 72
 const STAGE_W: int = 1461
 const STAGE_H: int = 937
 
-const GRID_COLS: int = 13
-const GRID_ROWS: int = 9
+const GRID_COLS_SMALL: int = 13
+const GRID_ROWS_SMALL: int = 9
+const GRID_COLS_MEDIUM: int = 16
+const GRID_ROWS_MEDIUM: int = 10
+const GRID_COLS_LARGE: int = 19
+const GRID_ROWS_LARGE: int = 12
 
 const INV_X: int = 1571
 const INV_Y: int = 72
@@ -24,11 +28,58 @@ const MIRROR_HALF_LEN: float = 56.0
 
 var current_stage: int = 1
 var stages: Dictionary = {}
+enum StageSize { SMALL, MEDIUM, LARGE }
+var stage_size: StageSize = StageSize.SMALL
+
+# --- UI Audio (Autoload で保持 → シーン跨ぎでも途切れない) ---
+var _se_hover: AudioStreamPlayer
+var _se_click: AudioStreamPlayer
+
+# --- フェード遷移 ---
+var _fade_layer: CanvasLayer
+var _fade_rect: ColorRect
+var _transitioning: bool = false
 
 
 func _ready() -> void:
 	_setup_cursor()
 	_init_stages()
+	_setup_ui_audio()
+	_setup_fade_overlay()
+
+
+func grid_cols() -> int:
+	match stage_size:
+		StageSize.MEDIUM:
+			return GRID_COLS_MEDIUM
+		StageSize.LARGE:
+			return GRID_COLS_LARGE
+		_:
+			return GRID_COLS_SMALL
+
+
+func grid_rows() -> int:
+	match stage_size:
+		StageSize.MEDIUM:
+			return GRID_ROWS_MEDIUM
+		StageSize.LARGE:
+			return GRID_ROWS_LARGE
+		_:
+			return GRID_ROWS_SMALL
+
+
+func set_stage_size(size_value: int) -> void:
+	stage_size = size_value
+
+
+func stage_size_label() -> String:
+	match stage_size:
+		StageSize.MEDIUM:
+			return "medium"
+		StageSize.LARGE:
+			return "large"
+		_:
+			return "small"
 
 
 func _setup_cursor() -> void:
@@ -39,14 +90,85 @@ func _setup_cursor() -> void:
 	Input.set_custom_mouse_cursor(small_tex, Input.CURSOR_ARROW, Vector2(10, 3))
 
 
+# --- UI 効果音 ---
+
+func _setup_ui_audio() -> void:
+	_se_hover = AudioStreamPlayer.new()
+	_se_hover.stream = load("res://assets/audio/ui_hover.mp3")
+	_se_hover.volume_db = -7.0
+	add_child(_se_hover)
+
+	_se_click = AudioStreamPlayer.new()
+	_se_click.stream = load("res://assets/audio/ui_click.mp3")
+	_se_click.volume_db = -6.0
+	add_child(_se_click)
+
+
+func play_hover_se() -> void:
+	if _se_hover and _se_hover.stream:
+		_se_hover.play()
+
+
+func play_click_se() -> void:
+	if _se_click and _se_click.stream:
+		_se_click.play()
+
+
+# --- シーン遷移 (フェードアウト → 切替 → フェードイン) ---
+
+func _setup_fade_overlay() -> void:
+	_fade_layer = CanvasLayer.new()
+	_fade_layer.layer = 100
+	add_child(_fade_layer)
+	_fade_rect = ColorRect.new()
+	_fade_rect.size = Vector2(SCREEN_W, SCREEN_H)
+	_fade_rect.color = Color(0, 0, 0, 0)
+	_fade_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fade_layer.add_child(_fade_rect)
+
+
+func change_scene(path: String, duration: float = 0.3) -> void:
+	if _transitioning:
+		return
+	_transitioning = true
+	_fade_rect.mouse_filter = Control.MOUSE_FILTER_STOP
+	var tw := create_tween()
+	tw.tween_property(_fade_rect, "color:a", 1.0, duration)
+	await tw.finished
+	get_tree().change_scene_to_file(path)
+	await get_tree().process_frame
+	var tw2 := create_tween()
+	tw2.tween_property(_fade_rect, "color:a", 0.0, duration)
+	await tw2.finished
+	_fade_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_transitioning = false
+
+
+func reload_scene(duration: float = 0.3) -> void:
+	if _transitioning:
+		return
+	_transitioning = true
+	_fade_rect.mouse_filter = Control.MOUSE_FILTER_STOP
+	var tw := create_tween()
+	tw.tween_property(_fade_rect, "color:a", 1.0, duration)
+	await tw.finished
+	get_tree().reload_current_scene()
+	await get_tree().process_frame
+	var tw2 := create_tween()
+	tw2.tween_property(_fade_rect, "color:a", 0.0, duration)
+	await tw2.finished
+	_fade_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_transitioning = false
+
+
 # --- 座標変換 ---
 
 func cell_width() -> float:
-	return float(STAGE_W) / GRID_COLS
+	return float(STAGE_W) / grid_cols()
 
 
 func cell_height() -> float:
-	return float(STAGE_H) / GRID_ROWS
+	return float(STAGE_H) / grid_rows()
 
 
 func grid_to_world(col: int, row: int) -> Vector2:
@@ -59,7 +181,7 @@ func grid_to_world(col: int, row: int) -> Vector2:
 func world_to_grid(pos: Vector2) -> Vector2i:
 	var col := int(floor((pos.x - STAGE_X) / cell_width()))
 	var row := int(floor((pos.y - STAGE_Y) / cell_height()))
-	return Vector2i(clampi(col, 0, GRID_COLS - 1), clampi(row, 0, GRID_ROWS - 1))
+	return Vector2i(clampi(col, 0, grid_cols() - 1), clampi(row, 0, grid_rows() - 1))
 
 
 func snap_to_grid(pos: Vector2) -> Vector2:
@@ -92,7 +214,6 @@ func mirror_surface_dir(angle_deg: int) -> Vector2:
 # --- ステージデータ ---
 
 func _init_stages() -> void:
-	# Stage 1: 直接ゴール (基本操作テスト)
 	stages[1] = {
 		"name": "基本操作",
 		"start": Vector2i(1, 4),
@@ -102,7 +223,6 @@ func _init_stages() -> void:
 		"fixed_mirrors": [],
 	}
 
-	# Stage 2: 1枚の鏡で反射
 	stages[2] = {
 		"name": "鏡の反射",
 		"start": Vector2i(0, 7),
@@ -112,7 +232,6 @@ func _init_stages() -> void:
 		"fixed_mirrors": [],
 	}
 
-	# Stage 3: 壁を迂回して2枚の鏡
 	stages[3] = {
 		"name": "複数の鏡",
 		"start": Vector2i(0, 4),
@@ -124,7 +243,6 @@ func _init_stages() -> void:
 		"fixed_mirrors": [],
 	}
 
-	# Stage 4: 固定鏡のみでクリア
 	stages[4] = {
 		"name": "固定鏡",
 		"start": Vector2i(0, 8),
@@ -136,7 +254,6 @@ func _init_stages() -> void:
 		],
 	}
 
-	# Stage 5: 壁+複数鏡の総合
 	stages[5] = {
 		"name": "総合",
 		"start": Vector2i(0, 8),
