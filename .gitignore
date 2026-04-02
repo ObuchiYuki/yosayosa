@@ -1,0 +1,50 @@
+# Godot 4+ specific ignores
+.godot/
+
+# Godot-specific ignores
+*.translation
+
+# Imported textures and samples
+.import/
+
+# Mono-specific ignores (if using C#)
+.mono/
+data_*/
+mono_crash.*.json
+
+# Export templates
+export_presets.cfg
+
+# Builds
+build/
+exports/
+*.pck
+*.exe
+*.x86_64
+*.x86
+*.arm64
+*.universal
+
+# Platform specific
+android/*.keystore
+android/build/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# IDE files
+.vscode/
+*.sublime-project
+*.sublime-workspace
+.idea/
+
+# Backup files
+*~
+*.bak

@@ -1,0 +1,92 @@
+[gd_scene load_steps=2 format=3 uid="uid://debug_menu"]
+
+[ext_resource type="Script" path="res://scripts/debug_menu.gd" id="1_debug"]
+
+[node name="DebugMenu" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_debug")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.08, 0.1, 0.12, 1)
+
+[node name="VBoxContainer" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -200.0
+offset_top = -260.0
+offset_right = 200.0
+offset_bottom = 260.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 36
+text = "デバッグステージ選択"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Separator" type="HSeparator" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="Stage1Button" type="Button" parent="VBoxContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 48)
+theme_override_font_sizes/font_size = 20
+text = "Stage 1: 基本操作"
+
+[node name="Stage2Button" type="Button" parent="VBoxContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 48)
+theme_override_font_sizes/font_size = 20
+text = "Stage 2: 鏡の反射"
+
+[node name="Stage3Button" type="Button" parent="VBoxContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 48)
+theme_override_font_sizes/font_size = 20
+text = "Stage 3: 複数の鏡"
+
+[node name="Stage4Button" type="Button" parent="VBoxContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 48)
+theme_override_font_sizes/font_size = 20
+text = "Stage 4: 固定鏡"
+
+[node name="Stage5Button" type="Button" parent="VBoxContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 48)
+theme_override_font_sizes/font_size = 20
+text = "Stage 5: 総合"
+
+[node name="Separator2" type="HSeparator" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="BackButton" type="Button" parent="VBoxContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 48)
+theme_override_font_sizes/font_size = 20
+text = "もどる"
+
+[connection signal="pressed" from="VBoxContainer/Stage1Button" to="." method="_on_stage_button_pressed" binds= [1]]
+[connection signal="pressed" from="VBoxContainer/Stage2Button" to="." method="_on_stage_button_pressed" binds= [2]]
+[connection signal="pressed" from="VBoxContainer/Stage3Button" to="." method="_on_stage_button_pressed" binds= [3]]
+[connection signal="pressed" from="VBoxContainer/Stage4Button" to="." method="_on_stage_button_pressed" binds= [4]]
+[connection signal="pressed" from="VBoxContainer/Stage5Button" to="." method="_on_stage_button_pressed" binds= [5]]
+[connection signal="pressed" from="VBoxContainer/BackButton" to="." method="_on_back_button_pressed"]

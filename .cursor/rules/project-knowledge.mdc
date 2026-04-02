@@ -1,0 +1,167 @@
+---
+description: yosayosa プロジェクト全体の構造・設計知識
+alwaysApply: true
+---
+
+# yosayosa — ひかりのパズル（Godot 4.3 / GDScript）
+
+## ゲーム概要
+
+2D見下ろし型の反射パズルゲーム。プレイヤー（ヨサリ）を光として発射し、鏡で反射させてゴールを目指す。
+
+### コアメカニクス
+- プレイヤーはドラッグで発射方向を決め、Spaceキーで発射
+- 鏡をインベントリからドラッグ＆ドロップでグリッド上に配置
+- 鏡は45度刻みで回転（左クリック=反時計、右クリック=時計回り）
+- 片面のみ反射（法線側が反射面、裏面に当たると壁と同じ扱い）
+- 固定鏡（動かせない鏡）がステージに配置される場合がある
+
+---
+
+## 画面レイアウト (1920×1080 固定)
+
+```
+ステージテンプレ.png が全画面背景。
+┌─────────────────────────┬──────┐
+│  ステージ領域             │ INV  │
+│  origin: (65, 72)        │(1571,│
+│  size:   1461 × 937      │ 72)  │
+│  grid:   13col × 9row    │296×  │
+│  cell:   ~112 × ~104     │937   │
+│                           │      │
+└─────────────────────────┴──────┘
+```
+
+定数は `GameManager` (Autoload) に集約:
+- `STAGE_X/Y/W/H`, `GRID_COLS/ROWS`, `INV_X/Y/W/H`
+- `cell_width()`, `cell_height()` — float で返す (STAGE_W/GRID_COLS)
+- `grid_to_world(col, row)` / `world_to_grid(pos)` / `snap_to_grid(pos)`
+
+---
+
+## ファイル構成
+
+### スクリプト (scripts/)
+| ファイル | 役割 |
+|---------|------|
+| `game_manager.gd` | Autoload。定数、座標変換、鏡物理、ステージデータ |
+| `game_stage.gd` | メインゲーム。シーン構築・入力・光路計算・演出すべて |
+| `title_screen.gd` | タイトル画面。素材レイヤー重ね、アニメーション入場 |
+| `debug_menu.gd` | デバッグステージ選択メニュー |
+| `blank_screen.gd` | 準備中の空画面 |
+
+### シーン (scenes/)
+| ファイル | 内容 |
+|---------|------|
+| `title_screen.tscn` | タイトル画面 (メインシーン) |
+| `debug_menu.tscn` | ステージ選択 (Stage 1-5) |
+| `game_stage.tscn` | ゲームステージ（最小構成、ほぼコードで構築） |
+| `blank_screen.tscn` | ギャラリー/オプション等の仮画面 |
+
+### 素材 (assets/)
+```
+assets/
+├── sprites/
+│   ├── stage_template.png    # 全画面背景テンプレ (1920×1080)
+│   ├── floor_tile.png        # 床タイル (200×200, ステージ内にタイリング)
+│   ├── wall_chip.png         # 壁 (110×156, 下104pxが煉瓦)
+│   ├── yosari.png            # プレイヤーキャラ (90×100)
+│   ├── magic_mirror.png      # 開始地点の装飾 (90×100)
+│   ├── bronze_mirror.png     # ゴール (110×142)
+│   ├── guide.png             # 発射方向ガイド
+│   ├── mirror_sign.png       # インベントリの「MIRROR」看板
+│   ├── cursor.png            # カスタムマウスカーソル
+│   ├── retry_icon.png        # リセットボタンアイコン
+│   ├── settings_icon.png     # 設定ボタンアイコン
+│   ├── mirror/
+│   │   ├── mirror_{0,45,...,315}.png  # 鏡8方向 (各100×100)
+│   │   └── mirror_front.png          # インベントリ表示用
+│   ├── light_anim/
+│   │   └── light_001〜007.png        # 反射時フラッシュアニメ
+│   ├── cutin/                        # クリアカットイン演出
+│   │   ├── cutin_bar.png, success_text.png, exclaim.png, emblem.png
+│   │   ├── btn_retry.png (670×136), btn_next.png (670×136)
+│   │   └── char_001〜014.png         # キャラアニメフレーム
+│   └── title/                        # タイトル画面素材
+│       ├── title_bg.png, title_banner.png, title_logo.png
+│       └── cmd_{start,gallery,option,quit}{,_red}.png
+└── audio/
+    ├── bgm_title.mp3         # タイトルBGM
+    ├── bgm_stage.mp3         # ステージBGM
+    ├── se_shoot.mp3          # 発射SE
+    └── se_reflect.wav        # 鏡反射SE
+```
+
+---
+
+## game_stage.gd の設計
+
+### ステートマシン
+```
+enum St { IDLE, AIMING, DRAGGING }
+```
+- IDLE: 待機。左クリックで鏡選択/インベントリ取得/エイム開始
+- AIMING: ドラッグ中に発射方向決定。guide_sprite が回転
+- DRAGGING: 鏡をマウス追従。離すとグリッドスナップ or インベントリ返却
+
+### シーン構築 (全てコードで生成)
+`_build_scene()` で背景→床→壁→開始装飾→ゴール→鏡→エフェクト→プレイヤー→ガイド→Line2D→パーティクル→UI の順に add_child。描画順＝追加順。
+
+### 鏡の管理
+- 各鏡は `Sprite2D` + メタデータ (`angle_deg: int`, `is_fixed: bool`)
+- `mirror_textures` Dictionary で角度→テクスチャ対応 (0,45,...,315)
+- `_rotate_mirror()` で角度変更 + テクスチャ差し替え
+- インベントリは `inv_count` (int) と `inv_visuals` (Sprite2D配列) で管理
+
+### 光路計算
+`_calc_light_path(start, dir)` → `{"path": Array[Vector2], "hits_goal": bool}`
+- 最大30回反射。`_find_nearest_hit()` でゴール/鏡/壁/境界の最近接判定
+- 鏡反射: `mirror_normal(angle)` = `(sin θ, -cos θ)`, dot < 0 なら反射面
+- 壁/境界: 線分交差で判定
+
+### 発射フロー
+1. `_start_shooting()` → 光路計算 → trail描画開始
+2. `_advance_trail()` → Line2D を高速描画 (8000px/s) + バウンス時にフラッシュ/SE
+3. trail完了 → プレイヤーが光路を高速移動 (4000px/s)
+4. `_on_path_end()` → 成功ならカットイン演出、失敗なら結果オーバーレイ
+
+### クリアカットイン
+`_play_clear_cutin()` → CanvasLayer(layer=10) に黒オーバーレイ + バー + SUCCESS + エンブレム + キャラアニメ → `_on_cutin_done()` でリトライ/次へボタン表示
+
+---
+
+## 鏡の反射物理
+
+角度θ度の鏡:
+- 表面方向: `(cos θ, sin θ)`
+- 反射面法線: `(sin θ, -cos θ)` — 0°で上向き、90°で右向き
+- 光線 dot 法線 < 0 → 反射面に当たった → 反射
+- 光線 dot 法線 >= 0 → 裏面 → 壁として停止
+
+代表的な反射パターン:
+| 入射 → 反射 | 鏡角度 |
+|-------------|--------|
+| 右 → 上 | 315° |
+| 右 → 下 | 225° |
+| 上 → 右 | 135° |
+| 下 → 右 | 45° |
+
+---
+
+## よくあるハマりポイント
+
+### TextureButton のサイズ
+`TextureButton` はデフォルトでテクスチャの元サイズを最小サイズとして使う。縮小するには:
+```gdscript
+btn.ignore_texture_size = true
+btn.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
+btn.custom_minimum_size = Vector2(desired_w, desired_h)
+btn.size = Vector2(desired_w, desired_h)
+```
+
+### オーディオ
+- BGM: 各シーンが `AudioStreamPlayer` を自前で持つ。シーン遷移で自動停止
+- SE: `_sounded_bounce_indices` で反射SEの重複再生を防止
+
+### 素材パス
+元素材は `提出用素材/ドット素材/` に日本語ファイル名で格納。`assets/` に英語リネームしてコピー済み。新素材追加時は同様に英語名でコピーすること。
