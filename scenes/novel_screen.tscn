@@ -1,8 +1,8 @@
-[gd_scene load_steps=2 format=3 uid="uid://cnovelscrn001"]
+[gd_scene format=3 uid="uid://cnovelscrn001"]
 
-[ext_resource type="Script" path="res://scripts/novel_screen.gd" id="1_novel"]
+[ext_resource type="Script" uid="uid://b1tb2hyyv3f6v" path="res://scripts/novel_screen.gd" id="1_novel"]
 
-[node name="NovelScreen" type="Control"]
+[node name="NovelScreen" type="Control" unique_id=1822099641]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0

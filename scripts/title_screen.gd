@@ -50,7 +50,9 @@ func _ready() -> void:
 
 func _start_bgm() -> void:
 	var player := AudioStreamPlayer.new()
-	player.stream = load("res://assets/audio/bgm_title.mp3")
+	var stream: AudioStreamMP3 = load("res://assets/audio/bgm_title.mp3")
+	stream.loop = true
+	player.stream = stream
 	player.volume_db = -6.0
 	player.autoplay = true
 	add_child(player)

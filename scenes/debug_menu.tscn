@@ -20,101 +20,60 @@ grow_horizontal = 2
 grow_vertical = 2
 color = Color(0.08, 0.1, 0.12, 1)
 
-[node name="VBoxContainer" type="VBoxContainer" parent="."]
+[node name="MarginContainer" type="MarginContainer" parent="."]
 layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -200.0
-offset_top = -260.0
-offset_right = 200.0
-offset_bottom = 260.0
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_constants/separation = 16
+theme_override_constants/margin_top = 40
+theme_override_constants/margin_bottom = 40
+theme_override_constants/margin_left = 80
+theme_override_constants/margin_right = 80
 
-[node name="Title" type="Label" parent="VBoxContainer"]
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 36
-text = "デバッグステージ選択"
-horizontal_alignment = 1
-vertical_alignment = 1
-
-[node name="SizeLabel" type="Label" parent="VBoxContainer"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 20
-text = "ステージサイズ"
+text = "デバッグメニュー"
 horizontal_alignment = 1
 
-[node name="SizeOption" type="OptionButton" parent="VBoxContainer"]
+[node name="TopBar" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2
-custom_minimum_size = Vector2(0, 44)
+theme_override_constants/separation = 16
+
+[node name="SizeLabel" type="Label" parent="MarginContainer/VBoxContainer/TopBar"]
+layout_mode = 2
 theme_override_font_sizes/font_size = 18
+text = "ステージサイズ:"
 
-[node name="Separator" type="HSeparator" parent="VBoxContainer"]
+[node name="SizeOption" type="OptionButton" parent="MarginContainer/VBoxContainer/TopBar"]
 layout_mode = 2
+custom_minimum_size = Vector2(200, 36)
+theme_override_font_sizes/font_size = 16
 
-[node name="Stage1Button" type="Button" parent="VBoxContainer"]
+[node name="ScrollContainer" type="ScrollContainer" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2
-custom_minimum_size = Vector2(0, 48)
-theme_override_font_sizes/font_size = 20
-text = "Stage 1: 基本操作"
+size_flags_vertical = 3
 
-[node name="Stage2Button" type="Button" parent="VBoxContainer"]
+[node name="ScrollContent" type="VBoxContainer" parent="MarginContainer/VBoxContainer/ScrollContainer"]
 layout_mode = 2
-custom_minimum_size = Vector2(0, 48)
-theme_override_font_sizes/font_size = 20
-text = "Stage 2: 鏡の反射"
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
 
-[node name="Stage3Button" type="Button" parent="VBoxContainer"]
+[node name="BottomBar" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2
-custom_minimum_size = Vector2(0, 48)
-theme_override_font_sizes/font_size = 20
-text = "Stage 3: 複数の鏡"
+theme_override_constants/separation = 16
+alignment = 1
 
-[node name="Stage4Button" type="Button" parent="VBoxContainer"]
+[node name="BackButton" type="Button" parent="MarginContainer/VBoxContainer/BottomBar"]
 layout_mode = 2
-custom_minimum_size = Vector2(0, 48)
-theme_override_font_sizes/font_size = 20
-text = "Stage 4: 固定鏡"
-
-[node name="Stage5Button" type="Button" parent="VBoxContainer"]
-layout_mode = 2
-custom_minimum_size = Vector2(0, 48)
-theme_override_font_sizes/font_size = 20
-text = "Stage 5: 総合"
-
-[node name="Separator2" type="HSeparator" parent="VBoxContainer"]
-layout_mode = 2
-
-[node name="SampleNovelButton" type="Button" parent="VBoxContainer"]
-layout_mode = 2
-custom_minimum_size = Vector2(0, 48)
-theme_override_font_sizes/font_size = 20
-text = "サンプルノベル"
-
-[node name="IntroNovelButton" type="Button" parent="VBoxContainer"]
-layout_mode = 2
-custom_minimum_size = Vector2(0, 48)
-theme_override_font_sizes/font_size = 20
-text = "導入ストーリー"
-
-[node name="Separator3" type="HSeparator" parent="VBoxContainer"]
-layout_mode = 2
-
-[node name="BackButton" type="Button" parent="VBoxContainer"]
-layout_mode = 2
-custom_minimum_size = Vector2(0, 48)
+custom_minimum_size = Vector2(200, 48)
 theme_override_font_sizes/font_size = 20
 text = "もどる"
 
-[connection signal="pressed" from="VBoxContainer/Stage1Button" to="." method="_on_stage_button_pressed" binds= [1]]
-[connection signal="pressed" from="VBoxContainer/Stage2Button" to="." method="_on_stage_button_pressed" binds= [2]]
-[connection signal="pressed" from="VBoxContainer/Stage3Button" to="." method="_on_stage_button_pressed" binds= [3]]
-[connection signal="pressed" from="VBoxContainer/Stage4Button" to="." method="_on_stage_button_pressed" binds= [4]]
-[connection signal="pressed" from="VBoxContainer/Stage5Button" to="." method="_on_stage_button_pressed" binds= [5]]
-[connection signal="pressed" from="VBoxContainer/SampleNovelButton" to="." method="_on_sample_novel_pressed"]
-[connection signal="pressed" from="VBoxContainer/IntroNovelButton" to="." method="_on_intro_novel_pressed"]
-[connection signal="pressed" from="VBoxContainer/BackButton" to="." method="_on_back_button_pressed"]
+[connection signal="pressed" from="MarginContainer/VBoxContainer/BottomBar/BackButton" to="." method="_on_back_button_pressed"]

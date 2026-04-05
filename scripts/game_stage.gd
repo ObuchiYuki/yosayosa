@@ -1,41 +1,26 @@
 extends Node2D
 
-## メインゲームステージ — 描画・入力・発射を管理
+## メインゲームステージ — オーケストレーター
+## 各ギミックの生成・入力・発射演出を統括する
 
-# ==================== テクスチャ ====================
+# ==================== テクスチャ（ステージ共通） ====================
 var tex_template := preload("res://assets/sprites/stage_template.png")
 var tex_floor := preload("res://assets/sprites/floor_tile.png")
-var tex_wall := preload("res://assets/sprites/wall_chip.png")
 var tex_player := preload("res://assets/sprites/yosari.png")
-var tex_goal := preload("res://assets/sprites/bronze_mirror.png")
-var tex_start := preload("res://assets/sprites/magic_mirror.png")
 var tex_mirror_front := preload("res://assets/sprites/mirror/mirror_front.png")
 var tex_guide: Texture2D
 var tex_mirror_sign: Texture2D
 var tex_retry_icon := preload("res://assets/sprites/retry_icon.png")
 var tex_settings_icon := preload("res://assets/sprites/settings_icon.png")
+var tex_inv_slot := preload("res://assets/sprites/inv_slot.png")
 
 var light_anim_frames: Array[Texture2D] = []
 
-var mirror_textures: Dictionary = {
-	0:   preload("res://assets/sprites/mirror/mirror_0.png"),
-	45:  preload("res://assets/sprites/mirror/mirror_45.png"),
-	90:  preload("res://assets/sprites/mirror/mirror_90.png"),
-	135: preload("res://assets/sprites/mirror/mirror_135.png"),
-	180: preload("res://assets/sprites/mirror/mirror_180.png"),
-	225: preload("res://assets/sprites/mirror/mirror_225.png"),
-	270: preload("res://assets/sprites/mirror/mirror_270.png"),
-	315: preload("res://assets/sprites/mirror/mirror_315.png"),
-}
-
 # ==================== ノード参照 ====================
 var floor_layer: Node2D
-var walls_layer: Node2D
-var mirrors_layer: Node2D
+var objects_layer: Node2D
 var effects_layer: Node2D
 var player_sprite: Sprite2D
-var goal_sprite: Sprite2D
-var start_sprite: Sprite2D
 var guide_sprite: Sprite2D
 var light_trail: Line2D
 var particle_trail: GPUParticles2D
@@ -46,22 +31,31 @@ var inv_visuals: Array[Sprite2D] = []
 var flash_overlay: ColorRect
 var motion_blur_sprites: Array[Sprite2D] = []
 
+# ==================== ステージオブジェクト ====================
+var stage_objects: Array[StageObject] = []
+var stage_data: Dictionary
+var _initial_mirror_count: int = 0
+var _original_start_pos: Vector2
+var _cached_wall_rects: Array[Rect2] = []
+
 # ==================== ステート ====================
 enum St { IDLE, AIMING, DRAGGING }
 var state: St = St.IDLE
-var aim_direction: Vector2 = Vector2.RIGHT
-var held_mirror: Sprite2D = null
+var aim_direction: Vector2 = Vector2.DOWN
+var held_object: StageObject = null
 var is_shooting: bool = false
 var light_path: Array[Vector2] = []
 var path_index: int = 0
 const LIGHT_SPEED: float = 8000.0
 var player_speed: float = LIGHT_SPEED
-var path_hits_goal: bool = false
+var _end_reason: String = ""
+var _hit_enemy_id: String = ""
 var _result_active: bool = false
 
-var stage_data: Dictionary
-var wall_rects: Array[Rect2] = []
 var inv_count: int = 0
+var inv_capacity: int = 0
+var inv_slot_sprites: Array[Sprite2D] = []
+var _inv_bg_rect: Rect2
 var player_start_pos: Vector2
 var player_base_scale: Vector2
 
@@ -74,10 +68,11 @@ var flash_alpha: float = 0.0
 
 const DRAG_THRESHOLD: float = 10.0
 var _press_origin: Vector2 = Vector2.ZERO
-var _press_mirror: Sprite2D = null
+var _press_object: StageObject = null
 
-const MOTION_BLUR_COUNT: int = 5
-const SPARKLE_INTERVAL: float = 18.0
+const MOTION_BLUR_COUNT: int = 10
+const MOTION_BLUR_SPACING: float = 10.0
+const SPARKLE_INTERVAL: float = 10.0
 
 var trail_sparkle_container: Node2D
 var _trail_sparkle_dist: float = 0.0
@@ -132,7 +127,9 @@ func _ready() -> void:
 
 func _setup_audio() -> void:
 	bgm_player = AudioStreamPlayer.new()
-	bgm_player.stream = load("res://assets/audio/bgm_stage.mp3")
+	var bgm_stream: AudioStreamMP3 = load("res://assets/audio/bgm_stage.mp3")
+	bgm_stream.loop = true
+	bgm_player.stream = bgm_stream
 	bgm_player.volume_db = -8.0
 	bgm_player.autoplay = true
 	add_child(bgm_player)
@@ -161,49 +158,31 @@ func _build_scene() -> void:
 	add_child(floor_layer)
 	_create_floor()
 
-	walls_layer = Node2D.new()
-	add_child(walls_layer)
-	wall_rects.clear()
-	for wd: Variant in stage_data.walls:
-		_create_wall(wd as Dictionary)
+	objects_layer = Node2D.new()
+	add_child(objects_layer)
 
-	var start_cell: Vector2i = stage_data.start
-	var start_pos: Vector2 = GameManager.grid_to_world(start_cell.x, start_cell.y)
-	player_start_pos = start_pos
-	start_sprite = Sprite2D.new()
-	start_sprite.texture = tex_start
-	start_sprite.position = start_pos
-	var ch: float = GameManager.cell_height()
-	var start_sf: float = (ch * 1.5) / tex_start.get_height()
-	start_sprite.scale = Vector2(start_sf, start_sf)
-	add_child(start_sprite)
+	var build_result := StageBuilder.build(stage_data)
+	stage_objects = build_result.objects
+	_initial_mirror_count = build_result.mirror_count
+	inv_capacity = build_result.inv_capacity
+	_original_start_pos = build_result.start_pos
+	player_start_pos = _original_start_pos
 
-	goal_sprite = Sprite2D.new()
-	goal_sprite.texture = tex_goal
-	var goal_cell: Vector2i = stage_data.goal
-	goal_sprite.position = GameManager.grid_to_world(goal_cell.x, goal_cell.y)
-	var goal_sf: float = (ch * 1.5) / tex_goal.get_height()
-	goal_sprite.scale = Vector2(goal_sf, goal_sf)
-	add_child(goal_sprite)
-
-	mirrors_layer = Node2D.new()
-	add_child(mirrors_layer)
-	for fm: Variant in stage_data.fixed_mirrors:
-		var fmd: Dictionary = fm as Dictionary
-		var fm_pos: Vector2i = fmd.pos
-		var fm_angle: int = fmd.angle
-		_create_placed_mirror(
-			GameManager.grid_to_world(fm_pos.x, fm_pos.y), fm_angle, true)
+	for obj in stage_objects:
+		objects_layer.add_child(obj)
 
 	effects_layer = Node2D.new()
+	effects_layer.z_index = 3
 	add_child(effects_layer)
 
+	var ch: float = GameManager.cell_height()
 	player_sprite = Sprite2D.new()
 	player_sprite.texture = tex_player
-	player_sprite.position = start_pos
+	player_sprite.position = player_start_pos
 	var player_sf: float = ch / tex_player.get_height() * 1.2
 	player_base_scale = Vector2(player_sf, player_sf)
 	player_sprite.scale = player_base_scale
+	player_sprite.z_index = 5
 	add_child(player_sprite)
 
 	for i in range(MOTION_BLUR_COUNT):
@@ -211,27 +190,31 @@ func _build_scene() -> void:
 		ghost.texture = tex_player
 		ghost.scale = player_base_scale
 		ghost.visible = false
-		ghost.modulate = Color(0.5, 0.8, 1.0, 0.3 - i * 0.05)
+		ghost.modulate = Color(0.5, 0.8, 1.0, 0.3 - i * 0.025)
+		ghost.z_index = 4
 		add_child(ghost)
 		motion_blur_sprites.append(ghost)
 
 	guide_sprite = Sprite2D.new()
 	guide_sprite.texture = tex_guide
-	guide_sprite.offset = Vector2(49 - 50, 38 - 354)
+	guide_sprite.offset = Vector2(49 - 50, 38 - 254)
+	guide_sprite.flip_v = true
 	guide_sprite.position = player_sprite.position
 	guide_sprite.rotation = aim_direction.angle() + PI / 2.0
+	guide_sprite.z_index = 5
 	add_child(guide_sprite)
 
 	light_trail = Line2D.new()
 	light_trail.width = 1.4
 	light_trail.default_color = Color(1.0, 0.95, 0.62, 0.5)
+	light_trail.z_index = 3
 	add_child(light_trail)
 
 	trail_sparkle_container = Node2D.new()
+	trail_sparkle_container.z_index = 3
 	add_child(trail_sparkle_container)
 
 	_setup_trail_particles()
-
 	_build_ui()
 
 
@@ -243,14 +226,14 @@ func _setup_trail_particles() -> void:
 
 	var mat := ParticleProcessMaterial.new()
 	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
-	mat.emission_sphere_radius = 0.8
+	mat.emission_sphere_radius = 0.3
 	mat.direction = Vector3(0, 0, 0)
-	mat.spread = 6.0
-	mat.initial_velocity_min = 4.0
-	mat.initial_velocity_max = 12.0
+	mat.spread = 3.0
+	mat.initial_velocity_min = 1.5
+	mat.initial_velocity_max = 5.0
 	mat.gravity = Vector3.ZERO
-	mat.scale_min = 1.8
-	mat.scale_max = 3.0
+	mat.scale_min = 0.8
+	mat.scale_max = 1.6
 	mat.color = Color(1.0, 0.96, 0.62, 1.0)
 	mat.hue_variation_min = -0.03
 	mat.hue_variation_max = 0.03
@@ -263,9 +246,9 @@ func _setup_trail_particles() -> void:
 	mat.color_ramp = color_tex
 
 	particle_trail.process_material = mat
+	particle_trail.z_index = 3
 	add_child(particle_trail)
 
-	# 外周の散りを別レイヤーで少量だけ足して、中央太めのレーザー感を出す
 	particle_trail_outer = GPUParticles2D.new()
 	particle_trail_outer.emitting = false
 	particle_trail_outer.amount = 8
@@ -273,20 +256,21 @@ func _setup_trail_particles() -> void:
 
 	var outer_mat := ParticleProcessMaterial.new()
 	outer_mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
-	outer_mat.emission_sphere_radius = 1.6
+	outer_mat.emission_sphere_radius = 0.6
 	outer_mat.direction = Vector3(0, 0, 0)
-	outer_mat.spread = 20.0
-	outer_mat.initial_velocity_min = 8.0
-	outer_mat.initial_velocity_max = 20.0
+	outer_mat.spread = 10.0
+	outer_mat.initial_velocity_min = 3.0
+	outer_mat.initial_velocity_max = 8.0
 	outer_mat.gravity = Vector3.ZERO
-	outer_mat.scale_min = 0.7
-	outer_mat.scale_max = 1.4
+	outer_mat.scale_min = 0.3
+	outer_mat.scale_max = 0.7
 	outer_mat.color = Color(1.0, 0.94, 0.58, 0.9)
 	outer_mat.hue_variation_min = -0.04
 	outer_mat.hue_variation_max = 0.04
 	outer_mat.color_ramp = color_tex
 
 	particle_trail_outer.process_material = outer_mat
+	particle_trail_outer.z_index = 3
 	add_child(particle_trail_outer)
 
 
@@ -309,68 +293,6 @@ func _create_floor() -> void:
 			floor_layer.add_child(s)
 			x += tw
 		y += th
-
-
-func _create_wall(wd: Dictionary) -> void:
-	var cw: float = GameManager.cell_width()
-	var ch: float = GameManager.cell_height()
-	var wall_brick_h: float = 104.0
-	var wall_full_h: float = float(tex_wall.get_height())
-	var wall_w: float = float(tex_wall.get_width())
-	var y_offset: float = wall_full_h - wall_brick_h
-
-	var w_pos: Vector2i = wd.pos
-	var w_size: Vector2i = wd["size"]
-	var bottom_row: int = w_size.y - 1
-
-	for row in range(w_size.y):
-		for col in range(w_size.x):
-			var gx: int = w_pos.x + col
-			var gy: int = w_pos.y + row
-			var center: Vector2 = GameManager.grid_to_world(gx, gy)
-
-			if row == bottom_row:
-				var s := Sprite2D.new()
-				s.texture = tex_wall
-				s.region_enabled = true
-				s.region_rect = Rect2(0, y_offset, wall_w, wall_brick_h)
-				s.position = center
-				s.scale = Vector2(cw / wall_w, ch / wall_brick_h)
-				walls_layer.add_child(s)
-			else:
-				var s := Sprite2D.new()
-				var img := Image.create(1, 1, false, Image.FORMAT_RGBA8)
-				img.set_pixel(0, 0, Color("2F2215"))
-				var tex := ImageTexture.create_from_image(img)
-				s.texture = tex
-				s.position = center
-				s.scale = Vector2(cw, ch)
-				walls_layer.add_child(s)
-
-	var rect := Rect2(
-		GameManager.STAGE_X + w_pos.x * cw,
-		GameManager.STAGE_Y + w_pos.y * ch,
-		w_size.x * cw,
-		w_size.y * ch
-	)
-	wall_rects.append(rect)
-
-
-func _create_placed_mirror(pos: Vector2, angle_deg: int, fixed: bool) -> Sprite2D:
-	var m := Sprite2D.new()
-	m.set_meta("angle_deg", angle_deg)
-	m.set_meta("is_fixed", fixed)
-	m.texture = mirror_textures[angle_deg]
-	m.position = pos
-	var sc: float = GameManager.cell_width() / m.texture.get_width() * 0.92
-	m.scale = Vector2(sc, sc)
-	mirrors_layer.add_child(m)
-	return m
-
-
-func _update_mirror_tex(m: Sprite2D) -> void:
-	var a: int = m.get_meta("angle_deg")
-	m.texture = mirror_textures[a]
 
 
 func _inv_item_pos(index: int) -> Vector2:
@@ -412,7 +334,7 @@ func _spawn_trail_sparkle(pos: Vector2) -> void:
 	p.emitting = true
 	p.one_shot = true
 	p.amount = 10
-	p.lifetime = 2.2
+	p.lifetime = 0.5
 	p.explosiveness = 0.5
 	p.randomness = 1.0
 	p.direction = Vector2.ZERO
@@ -469,12 +391,15 @@ func _build_ui() -> void:
 	add_child(ui_layer)
 
 	stage_label = Label.new()
-	stage_label.text = "STAGE %d: %s [%s]" % [
-		GameManager.current_stage, str(stage_data.name), GameManager.stage_size_label()
-	]
-	stage_label.position = Vector2(GameManager.STAGE_X + GameManager.STAGE_W / 2.0 - 100, 10)
-	stage_label.add_theme_font_size_override("font_size", 28)
+	var display_title: String = stage_data.get("title", "1 - %d" % GameManager.current_stage)
+	stage_label.text = display_title
+	var stage_font := load("res://assets/fonts/BestTen-DOT.otf")
+	stage_label.add_theme_font_override("font", stage_font)
+	stage_label.add_theme_font_size_override("font_size", 48)
 	stage_label.add_theme_color_override("font_color", Color.WHITE)
+	stage_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	stage_label.position = Vector2(GameManager.SCREEN_W / 2.0 - 130, 4)
+	stage_label.size = Vector2(GameManager.STAGE_W, 60)
 	ui_layer.add_child(stage_label)
 
 	_build_inventory()
@@ -488,8 +413,9 @@ func _build_ui() -> void:
 
 
 func _build_inventory() -> void:
-	inv_count = int(stage_data.mirror_count)
+	inv_count = _initial_mirror_count
 	inv_visuals.clear()
+	inv_slot_sprites.clear()
 
 	var inv_bg := ColorRect.new()
 	inv_bg.position = Vector2(GameManager.INV_X, GameManager.INV_Y)
@@ -498,6 +424,7 @@ func _build_inventory() -> void:
 	inv_bg.color = Color("786D5C")
 	inv_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(inv_bg)
+	_inv_bg_rect = Rect2(inv_bg.position, inv_bg.size)
 
 	var sign_sprite := Sprite2D.new()
 	sign_sprite.texture = tex_mirror_sign
@@ -506,6 +433,15 @@ func _build_inventory() -> void:
 		GameManager.INV_X + GameManager.INV_W / 2.0,
 		GameManager.INV_Y + 50)
 	add_child(sign_sprite)
+
+	for i in range(inv_capacity):
+		var slot := Sprite2D.new()
+		slot.texture = tex_inv_slot
+		slot.position = _inv_item_pos(i)
+		var slot_sc: float = 1.8
+		slot.scale = Vector2(slot_sc, slot_sc)
+		add_child(slot)
+		inv_slot_sprites.append(slot)
 
 	for i in range(inv_count):
 		var s := Sprite2D.new()
@@ -547,6 +483,26 @@ func _build_bottom_icons() -> void:
 	ui_layer.add_child(retry_icon)
 
 
+# ==================== ヘルパー ====================
+
+func _collect_wall_rects() -> void:
+	_cached_wall_rects.clear()
+	for obj in stage_objects:
+		_cached_wall_rects.append_array(obj.get_wall_rects())
+
+
+func _draggable_object_at(pos: Vector2) -> StageObject:
+	var best: StageObject = null
+	var best_dist: float = GameManager.cell_width() * 0.6
+	for obj in stage_objects:
+		if obj.is_draggable() and obj.hit_test(pos):
+			var d: float = obj.global_position.distance_to(pos)
+			if d < best_dist:
+				best_dist = d
+				best = obj
+	return best
+
+
 # ==================== 結果表示 ====================
 
 func _show_result(success: bool) -> void:
@@ -568,6 +524,18 @@ func _show_result(success: bool) -> void:
 	else:
 		player_sprite.visible = false
 		_start_collision_anim()
+
+
+func _handle_refire() -> void:
+	var refire_pos: Vector2 = light_path[-1]
+	player_start_pos = refire_pos
+	player_sprite.position = refire_pos
+	player_sprite.rotation = 0
+	guide_sprite.position = refire_pos
+	guide_sprite.visible = true
+	for obj in stage_objects:
+		obj.on_shooting_end()
+		obj.on_refire()
 
 
 func _get_impact_direction() -> String:
@@ -593,7 +561,7 @@ func _get_impact_direction() -> String:
 
 	var min_dist: float = INF
 	var direction: String = "down"
-	for rect in wall_rects:
+	for rect in _cached_wall_rects:
 		var in_x: bool = impact.x >= rect.position.x - threshold and impact.x <= rect.end.x + threshold
 		var in_y: bool = impact.y >= rect.position.y - threshold and impact.y <= rect.end.y + threshold
 		if in_x:
@@ -693,7 +661,10 @@ func _show_fail_cutin() -> void:
 	add_child(_fail_cutin)
 	_fail_cutin.retry_requested.connect(reset_stage.bind(true))
 	_fail_cutin.title_requested.connect(_on_title)
-	_fail_cutin.play()
+	if _end_reason == "enemy" and _hit_enemy_id != "":
+		_fail_cutin.play(_hit_enemy_id)
+	else:
+		_fail_cutin.play()
 
 
 # ==================== 入力 ====================
@@ -719,32 +690,33 @@ func _on_mouse_button(ev: InputEventMouseButton) -> void:
 	match state:
 		St.IDLE:
 			if ev.button_index == MOUSE_BUTTON_LEFT and ev.pressed:
-				var clicked_mirror := _mirror_at(pos)
-				if clicked_mirror and not clicked_mirror.get_meta("is_fixed"):
+				var clicked := _draggable_object_at(pos)
+				if clicked:
 					_press_origin = pos
-					_press_mirror = clicked_mirror
-				elif GameManager.is_in_inventory(pos) and inv_count > 0:
-					held_mirror = _take_from_inventory()
-					if held_mirror:
-						held_mirror.position = pos
+					_press_object = clicked
+				elif _inv_bg_rect.has_point(pos) and inv_count > 0:
+					var new_mirror := _take_from_inventory()
+					if new_mirror:
+						held_object = new_mirror
+						held_object.position = pos
 						state = St.DRAGGING
-						held_mirror.z_as_relative = false
-						held_mirror.z_index = 100
+						held_object.z_as_relative = false
+						held_object.z_index = 100
 				elif GameManager.is_in_stage(pos):
 					state = St.AIMING
 					_update_aim(pos)
 
 			elif ev.button_index == MOUSE_BUTTON_LEFT and not ev.pressed:
-				if _press_mirror:
-					_rotate_mirror(_press_mirror, false)
-					_press_mirror = null
+				if _press_object:
+					_press_object.on_rotate(false)
+					_press_object = null
 				elif state == St.AIMING:
 					state = St.IDLE
 
 			elif ev.button_index == MOUSE_BUTTON_RIGHT and ev.pressed:
-				var m := _mirror_at(pos)
-				if m and not m.get_meta("is_fixed"):
-					_rotate_mirror(m, true)
+				var clicked := _draggable_object_at(pos)
+				if clicked:
+					clicked.on_rotate(true)
 
 		St.AIMING:
 			if ev.button_index == MOUSE_BUTTON_LEFT and not ev.pressed:
@@ -752,27 +724,27 @@ func _on_mouse_button(ev: InputEventMouseButton) -> void:
 
 		St.DRAGGING:
 			if ev.button_index == MOUSE_BUTTON_LEFT and not ev.pressed:
-				_release_mirror()
+				_release_object()
 			elif ev.button_index == MOUSE_BUTTON_RIGHT and ev.pressed:
-				if held_mirror:
-					_rotate_mirror(held_mirror, true)
+				if held_object:
+					held_object.on_rotate(true)
 
 
 func _on_mouse_motion(ev: InputEventMouseMotion) -> void:
-	if _press_mirror:
+	if _press_object:
 		if ev.position.distance_to(_press_origin) >= DRAG_THRESHOLD:
-			held_mirror = _press_mirror
-			_press_mirror = null
+			held_object = _press_object
+			_press_object = null
 			state = St.DRAGGING
-			held_mirror.z_as_relative = false
-			held_mirror.z_index = 100
+			held_object.z_as_relative = false
+			held_object.z_index = 100
 
 	match state:
 		St.AIMING:
 			_update_aim(ev.position)
 		St.DRAGGING:
-			if held_mirror:
-				held_mirror.position = ev.position
+			if held_object:
+				held_object.position = ev.position
 
 
 func _update_aim(target: Vector2) -> void:
@@ -785,43 +757,27 @@ func _update_aim(target: Vector2) -> void:
 	guide_sprite.rotation = snapped_rad + PI / 2.0
 
 
-# ==================== 鏡操作 ====================
+# ==================== オブジェクト操作 ====================
 
-func _mirror_at(pos: Vector2) -> Sprite2D:
-	var best: Sprite2D = null
-	var best_dist: float = GameManager.cell_width() * 0.6
-	for child: Node in mirrors_layer.get_children():
-		var m: Sprite2D = child as Sprite2D
-		var d: float = m.position.distance_to(pos)
-		if d < best_dist:
-			best_dist = d
-			best = m
-	return best
-
-
-func _rotate_mirror(m: Sprite2D, clockwise: bool) -> void:
-	var a: int = m.get_meta("angle_deg")
-	if clockwise:
-		a = (a + GameManager.ROTATION_STEP) % 360
-	else:
-		a = (a - GameManager.ROTATION_STEP + 360) % 360
-	m.set_meta("angle_deg", a)
-	_update_mirror_tex(m)
-
-
-func _take_from_inventory() -> Sprite2D:
+func _take_from_inventory() -> MirrorObject:
 	if inv_count <= 0:
 		return null
 	inv_count -= 1
 	if inv_visuals.size() > 0:
 		var vis: Sprite2D = inv_visuals.pop_back()
 		vis.queue_free()
-	return _create_placed_mirror(Vector2.ZERO, 180, false)
+	var m := MirrorObject.create(Vector2.ZERO, 180, false)
+	objects_layer.add_child(m)
+	stage_objects.append(m)
+	return m
 
 
-func _return_to_inventory(m: Sprite2D) -> void:
-	mirrors_layer.remove_child(m)
-	m.queue_free()
+func _return_to_inventory(obj: StageObject) -> bool:
+	if inv_count >= inv_capacity:
+		return false
+	stage_objects.erase(obj)
+	objects_layer.remove_child(obj)
+	obj.queue_free()
 	var s := Sprite2D.new()
 	s.texture = tex_mirror_front
 	s.position = _inv_item_pos(inv_count)
@@ -829,49 +785,58 @@ func _return_to_inventory(m: Sprite2D) -> void:
 	add_child(s)
 	inv_visuals.append(s)
 	inv_count += 1
+	return true
 
 
-func _release_mirror() -> void:
-	if not held_mirror:
+func _release_object() -> void:
+	if not held_object:
 		state = St.IDLE
 		return
-	held_mirror.z_as_relative = true
-	held_mirror.z_index = 0
-	var pos := held_mirror.position
-	if GameManager.is_in_inventory(pos):
-		_return_to_inventory(held_mirror)
+	held_object.z_as_relative = true
+	held_object.z_index = 2
+	var pos := held_object.position
+	if _inv_bg_rect.has_point(pos):
+		if not _return_to_inventory(held_object):
+			held_object.position = GameManager.snap_to_grid(pos)
 	elif GameManager.is_in_stage(pos):
-		held_mirror.position = GameManager.snap_to_grid(pos)
+		held_object.position = GameManager.snap_to_grid(pos)
 	else:
-		held_mirror.position = GameManager.snap_to_grid(pos)
-	held_mirror = null
+		held_object.position = GameManager.snap_to_grid(pos)
+	held_object = null
 	state = St.IDLE
 
 
 # ==================== モーションブラー ====================
 
-var _prev_positions: Array[Vector2] = []
+func _dir_at_distance(dist: float) -> Vector2:
+	var acc: float = 0.0
+	for i in range(light_path.size() - 1):
+		var seg_len := light_path[i].distance_to(light_path[i + 1])
+		if acc + seg_len >= dist:
+			return (light_path[i + 1] - light_path[i]).normalized()
+		acc += seg_len
+	if light_path.size() >= 2:
+		return (light_path[-1] - light_path[-2]).normalized()
+	return Vector2.RIGHT
+
 
 func _update_motion_blur(move_dir: Vector2) -> void:
-	_prev_positions.push_front(player_sprite.position)
-	if _prev_positions.size() > MOTION_BLUR_COUNT:
-		_prev_positions.resize(MOTION_BLUR_COUNT)
-
 	player_sprite.rotation = move_dir.angle() + PI / 2.0
 
 	for i in range(motion_blur_sprites.size()):
 		var ghost := motion_blur_sprites[i]
-		if i < _prev_positions.size():
-			ghost.visible = true
-			ghost.position = _prev_positions[i]
-			ghost.rotation = player_sprite.rotation
-			ghost.modulate.a = 0.25 - i * 0.04
-		else:
+		var behind_dist := trail_draw_progress - (i + 1) * MOTION_BLUR_SPACING
+		if behind_dist < 0:
 			ghost.visible = false
+			continue
+		ghost.visible = true
+		ghost.position = _pos_at_distance(behind_dist)
+		var seg_dir := _dir_at_distance(behind_dist)
+		ghost.rotation = seg_dir.angle() + PI / 2.0
+		ghost.modulate.a = 0.3 - i * 0.025
 
 
 func _hide_motion_blur() -> void:
-	_prev_positions.clear()
 	for ghost in motion_blur_sprites:
 		ghost.visible = false
 	player_sprite.rotation = 0
@@ -880,27 +845,31 @@ func _hide_motion_blur() -> void:
 # ==================== 発射・移動 ====================
 
 func _start_shooting() -> void:
-	var mirrors_data: Array = []
-	for child: Node in mirrors_layer.get_children():
-		var m: Sprite2D = child as Sprite2D
-		mirrors_data.append({
-			"position": m.position,
-			"angle_deg": m.get_meta("angle_deg"),
-		})
+	for obj in stage_objects:
+		obj.on_shooting_start()
+	_collect_wall_rects()
+
+	var hit_objects: Array[Dictionary] = []
+	for obj in stage_objects:
+		hit_objects.append_array(obj.snapshot())
+
 	var result := LightCalculator.calc_light_path(
-		player_sprite.position, aim_direction,
-		goal_sprite.position, mirrors_data, wall_rects)
+		player_sprite.position, aim_direction, hit_objects)
 	light_path = result.path
-	path_hits_goal = result.hits_goal
+	_end_reason = result.end_reason
+	_hit_enemy_id = result.get("enemy_id", "")
 	if light_path.size() < 2:
+		for obj in stage_objects:
+			obj.on_shooting_end()
 		return
+
 	is_shooting = true
 	path_index = 0
 	guide_sprite.visible = false
 	se_shoot_player.play()
-	if state == St.DRAGGING and held_mirror:
-		_release_mirror()
-	_press_mirror = null
+	if state == St.DRAGGING and held_object:
+		_release_object()
+	_press_object = null
 	state = St.IDLE
 
 	bounce_points.clear()
@@ -921,6 +890,10 @@ func _start_shooting() -> void:
 
 
 func _process(delta: float) -> void:
+	if not is_shooting:
+		for obj in stage_objects:
+			obj.update_tick(delta)
+
 	guide_blink_time += delta
 	var blink_alpha: float = 0.5 + 0.5 * sin(guide_blink_time * PI)
 	guide_sprite.modulate.a = blink_alpha
@@ -1000,7 +973,16 @@ func _on_path_end() -> void:
 	particle_trail.emitting = false
 	particle_trail_outer.emitting = false
 	_hide_motion_blur()
-	_show_result(path_hits_goal)
+
+	match _end_reason:
+		"goal":
+			_show_result(true)
+		"refire":
+			_handle_refire()
+		_:
+			for obj in stage_objects:
+				obj.on_shooting_end()
+			_show_result(false)
 
 
 # ==================== ナビゲーション ====================
@@ -1023,10 +1005,12 @@ func reset_stage(preserve_placed_mirrors: bool = false) -> void:
 	trail_drawing = false
 	state = St.IDLE
 	path_index = 0
-	path_hits_goal = false
+	_end_reason = ""
+	_hit_enemy_id = ""
 	light_path.clear()
 	light_trail.clear_points()
 	light_trail.modulate.a = 1.0
+	player_start_pos = _original_start_pos
 	guide_sprite.visible = true
 	guide_sprite.position = player_start_pos
 	flash_alpha = 0.0
@@ -1037,7 +1021,7 @@ func reset_stage(preserve_placed_mirrors: bool = false) -> void:
 	particle_trail.emitting = false
 	particle_trail_outer.emitting = false
 	_hide_motion_blur()
-	_press_mirror = null
+	_press_object = null
 
 	for child in trail_sparkle_container.get_children():
 		child.queue_free()
@@ -1046,21 +1030,34 @@ func reset_stage(preserve_placed_mirrors: bool = false) -> void:
 	for child in effects_layer.get_children():
 		child.queue_free()
 
+	for obj in stage_objects:
+		obj.on_stage_reset()
+
 	if not preserve_placed_mirrors:
-		var to_remove: Array[Sprite2D] = []
-		for child: Node in mirrors_layer.get_children():
-			var m: Sprite2D = child as Sprite2D
-			if not m.get_meta("is_fixed"):
-				to_remove.append(m)
-		for m in to_remove:
-			m.queue_free()
+		var to_remove: Array[StageObject] = []
+		for obj in stage_objects:
+			if obj is MirrorObject and not obj.is_fixed:
+				to_remove.append(obj)
+		for obj in to_remove:
+			stage_objects.erase(obj)
+			objects_layer.remove_child(obj)
+			obj.queue_free()
+
+		for gimmick: Variant in stage_data.get("gimmicks", []):
+			var gd: Dictionary = gimmick as Dictionary
+			if gd.get("type") == "placed_mirror":
+				var m := MirrorObject.create(
+					GameManager.grid_to_world(gd.pos.x, gd.pos.y),
+					gd.angle, false)
+				objects_layer.add_child(m)
+				stage_objects.append(m)
 
 		for v in inv_visuals:
 			if is_instance_valid(v):
 				v.queue_free()
 		inv_visuals.clear()
 		inv_count = 0
-		for i in range(int(stage_data.mirror_count)):
+		for i in range(_initial_mirror_count):
 			var s := Sprite2D.new()
 			s.texture = tex_mirror_front
 			s.position = _inv_item_pos(i)
@@ -1069,13 +1066,16 @@ func reset_stage(preserve_placed_mirrors: bool = false) -> void:
 			inv_visuals.append(s)
 			inv_count += 1
 
-	held_mirror = null
+	held_object = null
 	if not bgm_player.playing:
 		bgm_player.play()
 
 
 func _on_back() -> void:
-	GameManager.change_scene("res://scenes/debug_menu.tscn")
+	if GameManager.is_debug_mode:
+		GameManager.change_scene("res://scenes/debug_menu.tscn")
+	else:
+		GameManager.change_scene("res://scenes/title_screen.tscn")
 
 
 func _on_settings() -> void:
@@ -1083,9 +1083,15 @@ func _on_settings() -> void:
 
 
 func _on_next_stage() -> void:
+	var max_stage := GameManager.get_max_stage()
 	GameManager.current_stage += 1
-	if GameManager.current_stage > 5:
-		GameManager.current_stage = 1
+	if GameManager.current_stage > max_stage:
+		if GameManager.is_debug_mode:
+			GameManager.current_stage = 1
+			GameManager.reload_scene()
+		else:
+			GameManager.change_scene("res://scenes/title_screen.tscn")
+		return
 	GameManager.reload_scene()
 
 

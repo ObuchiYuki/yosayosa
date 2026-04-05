@@ -27,7 +27,9 @@ const ROTATION_STEP: int = 45
 const MIRROR_HALF_LEN: float = 56.0
 
 var current_stage: int = 1
+var is_debug_mode: bool = false
 var stages: Dictionary = {}
+var debug_stages: Dictionary = {}
 enum StageSize { SMALL, MEDIUM, LARGE }
 var stage_size: StageSize = StageSize.SMALL
 
@@ -43,6 +45,7 @@ var _transitioning: bool = false
 
 func _ready() -> void:
 	_setup_cursor()
+	_init_debug_stages()
 	_init_stages()
 	_setup_ui_audio()
 	_setup_fade_overlay()
@@ -212,62 +215,156 @@ func mirror_surface_dir(angle_deg: int) -> Vector2:
 
 
 # --- ステージデータ ---
+# gimmicks 配列でギミックを定義する新形式
+# type: "wall_block"      → pos: Vector2i, size: Vector2i
+# type: "fixed_mirror"    → pos: Vector2i, angle: int, mirror_kind: String (optional)
+# type: "refire_mirror"   → pos: Vector2i
+# type: "enemy_zone"      → pos: Vector2i, size: Vector2i, id: String (optional)
+# type: "moving_platform" → pos: Vector2i, size: Vector2i, axis: String, range: Array, speed: float
 
-func _init_stages() -> void:
-	stages[1] = {
+func _init_debug_stages() -> void:
+	debug_stages[1] = {
 		"name": "基本操作",
 		"start": Vector2i(1, 4),
 		"goal": Vector2i(11, 4),
-		"walls": [],
 		"mirror_count": 0,
-		"fixed_mirrors": [],
+		"gimmicks": [],
 	}
 
-	stages[2] = {
+	debug_stages[2] = {
 		"name": "鏡の反射",
 		"start": Vector2i(0, 7),
 		"goal": Vector2i(12, 1),
-		"walls": [],
 		"mirror_count": 1,
-		"fixed_mirrors": [],
+		"gimmicks": [],
 	}
 
-	stages[3] = {
+	debug_stages[3] = {
 		"name": "複数の鏡",
 		"start": Vector2i(0, 4),
 		"goal": Vector2i(12, 4),
-		"walls": [
-			{"pos": Vector2i(6, 1), "size": Vector2i(1, 7)},
-		],
 		"mirror_count": 2,
-		"fixed_mirrors": [],
+		"gimmicks": [
+			{"type": "wall_block", "pos": Vector2i(6, 1), "size": Vector2i(1, 7)},
+		],
 	}
 
-	stages[4] = {
+	debug_stages[4] = {
 		"name": "固定鏡",
 		"start": Vector2i(0, 8),
 		"goal": Vector2i(6, 0),
-		"walls": [],
 		"mirror_count": 0,
-		"fixed_mirrors": [
-			{"pos": Vector2i(6, 8), "angle": 315},
+		"gimmicks": [
+			{"type": "fixed_mirror", "pos": Vector2i(6, 8), "angle": 315},
 		],
 	}
 
-	stages[5] = {
+	debug_stages[5] = {
 		"name": "総合",
 		"start": Vector2i(0, 8),
 		"goal": Vector2i(12, 0),
-		"walls": [
-			{"pos": Vector2i(3, 0), "size": Vector2i(1, 4)},
-			{"pos": Vector2i(3, 5), "size": Vector2i(1, 4)},
-			{"pos": Vector2i(9, 1), "size": Vector2i(1, 3)},
-			{"pos": Vector2i(9, 5), "size": Vector2i(1, 4)},
-		],
 		"mirror_count": 3,
-		"fixed_mirrors": [],
+		"gimmicks": [
+			{"type": "wall_block", "pos": Vector2i(3, 0), "size": Vector2i(1, 4)},
+			{"type": "wall_block", "pos": Vector2i(3, 5), "size": Vector2i(1, 4)},
+			{"type": "wall_block", "pos": Vector2i(9, 1), "size": Vector2i(1, 3)},
+			{"type": "wall_block", "pos": Vector2i(9, 5), "size": Vector2i(1, 4)},
+		],
+	}
+
+	debug_stages[6] = {
+		"name": "両面鏡",
+		"start": Vector2i(0, 4),
+		"goal": Vector2i(12, 4),
+		"mirror_count": 0,
+		"gimmicks": [
+			{"type": "wall_block", "pos": Vector2i(6, 0), "size": Vector2i(1, 3)},
+			{"type": "wall_block", "pos": Vector2i(6, 6), "size": Vector2i(1, 3)},
+			{"type": "fixed_mirror", "pos": Vector2i(6, 4), "angle": 45, "mirror_kind": "two_sided"},
+			{"type": "fixed_mirror", "pos": Vector2i(10, 0), "angle": 135, "mirror_kind": "two_sided"},
+		],
+	}
+
+	debug_stages[7] = {
+		"name": "マジックミラー",
+		"start": Vector2i(0, 8),
+		"goal": Vector2i(12, 0),
+		"mirror_count": 1,
+		"gimmicks": [
+			{"type": "wall_block", "pos": Vector2i(4, 0), "size": Vector2i(1, 5)},
+			{"type": "wall_block", "pos": Vector2i(8, 4), "size": Vector2i(1, 5)},
+			{"type": "fixed_mirror", "pos": Vector2i(4, 7), "angle": 315, "mirror_kind": "one_way"},
+			{"type": "fixed_mirror", "pos": Vector2i(8, 2), "angle": 315, "mirror_kind": "one_way"},
+		],
+	}
+
+	debug_stages[8] = {
+		"name": "移動壁と敵",
+		"start": Vector2i(0, 4),
+		"goal": Vector2i(12, 4),
+		"mirror_count": 2,
+		"gimmicks": [
+			{"type": "moving_platform", "pos": Vector2i(5, 3), "size": Vector2i(1, 3),
+			 "axis": "x", "range": [3, 7], "speed": 1.5},
+			{"type": "enemy_zone", "pos": Vector2i(9, 3), "size": Vector2i(1, 3), "id": "slime"},
+			{"type": "refire_mirror", "pos": Vector2i(6, 0)},
+		],
+	}
+
+	debug_stages[9] = {
+		"name": "回収テスト",
+		"start": Vector2i(0, 4),
+		"goal": Vector2i(12, 4),
+		"mirror_count": 1,
+		"inv_capacity": 4,
+		"gimmicks": [
+			{"type": "wall_block", "pos": Vector2i(6, 0), "size": Vector2i(1, 4)},
+			{"type": "wall_block", "pos": Vector2i(6, 5), "size": Vector2i(1, 4)},
+			{"type": "placed_mirror", "pos": Vector2i(3, 2), "angle": 45},
+			{"type": "placed_mirror", "pos": Vector2i(3, 6), "angle": 315},
+			{"type": "fixed_mirror", "pos": Vector2i(9, 2), "angle": 315},
+		],
 	}
 
 
+func _init_stages() -> void:
+	# 全体サイズ: (12, 8)
+	stages[1] = {
+		"name": "チュートリアル1",
+		"title": "1",
+		"start": Vector2i(6, 1),
+		"goal": Vector2i(6, 7),
+		"mirror_count": 0,
+		"gimmicks": [],
+	}
+	stages[2] = {
+		"name": "感覚遮断何か",
+		"title": "2",
+		"start": Vector2i(11, 1),
+		"goal": Vector2i(1, 7),
+		"mirror_count": 1,
+		"gimmicks": [
+			{"type": "wall_block", "pos": Vector2i(0, 4), "size": Vector2i(9, 1)},
+			{"type": "enemy_zone", "pos": Vector2i(0, 3), "size": Vector2i(2, 1), "id": "pitfall"},
+		]
+	}
+
+
+func _active_stages() -> Dictionary:
+	return debug_stages if is_debug_mode else stages
+
+
 func get_stage_data(num: int) -> Dictionary:
-	return stages.get(num, stages[1])
+	var src := _active_stages()
+	if src.has(num):
+		return src[num]
+	if src.size() > 0:
+		return src.values()[0]
+	return {}
+
+
+func get_max_stage() -> int:
+	var src := _active_stages()
+	if src.is_empty():
+		return 0
+	return src.keys().max()

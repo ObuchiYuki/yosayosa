@@ -1,4 +1,4 @@
-[gd_scene load_steps=2 format=3 uid="uid://cintronovel001"]
+[gd_scene format=3 uid="uid://c728hk73nremi"]
 
 [ext_resource type="Script" path="res://scripts/intro_novel.gd" id="1_intro"]
 

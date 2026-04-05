@@ -1,4 +1,4 @@
-[gd_scene load_steps=2 format=3 uid="uid://csamplenovel01"]
+[gd_scene format=3 uid="uid://8nkl5f5gxdc7"]
 
 [ext_resource type="Script" path="res://scripts/sample_novel.gd" id="1_sample"]
 

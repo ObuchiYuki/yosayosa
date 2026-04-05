@@ -10,6 +10,7 @@ signal novel_finished
 var tex_game_bg := preload("res://assets/sprites/novel/game_bg.png")
 var tex_dialog_frame := preload("res://assets/sprites/novel/dialog_frame.png")
 var tex_next_icon := preload("res://assets/sprites/novel/next_icon.png")
+var tex_skip_icon := preload("res://assets/sprites/novel/skip_icon.png")
 var font_dot := preload("res://assets/fonts/BestTen-DOT.otf")
 
 # --- 画像ID → テクスチャパス ---
@@ -46,6 +47,16 @@ const IMAGE_PATHS: Dictionary = {
 	"imagination_mirror": "res://assets/sprites/novel/imagination_mirror.png",
 	"motion_lines": "res://assets/sprites/novel/motion_lines.png",
 	"magic_mirror": "res://assets/sprites/novel/magic_mirror.png",
+	"bg_bedroom": "res://assets/sprites/novel/bg_bedroom.jpg",
+	"bg_bathroom": "res://assets/sprites/novel/bg_bathroom.jpg",
+	"bg_washroom": "res://assets/sprites/novel/bg_washroom.jpg",
+	"bg_earth_space": "res://assets/sprites/novel/bg_earth_space.png",
+	"bg_city_aerial": "res://assets/sprites/novel/bg_city_aerial.jpg",
+	"bg_stone_wall": "res://assets/sprites/novel/bg_stone_wall.png",
+	"bg_japan_map": "res://assets/sprites/novel/bg_japan_map.png",
+	"floor_plan": "res://assets/sprites/novel/floor_plan.png",
+	"full_mirror": "res://assets/sprites/novel/full_mirror.png",
+	"full_mirror_rotate": "res://assets/sprites/novel/full_mirror_rotate.png",
 }
 
 # --- SE ID → パス ---
@@ -90,12 +101,16 @@ const DIALOG_FRAME_TEX_W := 1902
 const DIALOG_FRAME_TEX_H := 273
 const DIALOG_FRAME_HEIGHT := roundi(float(SCREEN_W) * float(DIALOG_FRAME_TEX_H) / float(DIALOG_FRAME_TEX_W))
 const DIALOG_PADDING := 30
-const FONT_SIZE := 44
+const FONT_SIZE := 52
 const LINE_SPACING := 24
 const CHAR_DELAY := 0.04
 const SPACE_DELAY := 0.3
-const NEXT_ICON_SIZE := 88
+const NEXT_ICON_SIZE := 176
 const NEXT_ICON_MARGIN := 16
+const SKIP_BTN_MARGIN := 20
+const SKIP_BTN_TARGET_H := 72.0
+const FADE_DURATION := 0.4
+const BGM_FADE_DURATION := 1.0
 
 # --- ノード ---
 var bg_sprite: TextureRect
@@ -104,21 +119,29 @@ var image_container: Control
 var dialog_frame: TextureRect
 var text_label: RichTextLabel
 var next_icon: TextureRect
+var skip_button: TextureButton
+var tap_catcher: Control
 var overlay_images: Dictionary = {}
 var se_players: Dictionary = {}
 var bgm_player: AudioStreamPlayer = null
+var _transition_overlay: ColorRect = null
 var _next_icon_tween: Tween = null
+var _key_se_player: AudioStreamPlayer = null
 
 # --- 状態 ---
 var _full_text: String = ""
 var _pages: Array[String] = []
+var _page_transitions: Array[String] = []
+var _page_transition_durations: Array[float] = []
 var _current_page: int = 0
 var _displayed_chars: int = 0
 var _is_typing: bool = false
+var _is_transitioning: bool = false
 var _skip_requested: bool = false
 var _on_complete: Callable
 
 var _char_timer: float = 0.0
+var _char_delay: float = CHAR_DELAY
 var _current_page_text: String = ""
 var _parsed_segments: Array = []
 var _segment_index: int = 0
@@ -130,6 +153,11 @@ func _ready() -> void:
 
 
 func _build_ui() -> void:
+	_key_se_player = AudioStreamPlayer.new()
+	_key_se_player.stream = load("res://assets/audio/se/se_key.mp3")
+	_key_se_player.volume_db = -10.0
+	add_child(_key_se_player)
+	
 	bg_sprite = TextureRect.new()
 	bg_sprite.texture = tex_game_bg
 	bg_sprite.custom_minimum_size = Vector2(SCREEN_W, SCREEN_H)
@@ -148,7 +176,10 @@ func _build_ui() -> void:
 	add_child(bg_image_sprite)
 	
 	image_container = Control.new()
-	image_container.set_anchors_preset(Control.PRESET_FULL_RECT)
+	image_container.position = Vector2.ZERO
+	image_container.custom_minimum_size = Vector2(SCREEN_W, SCREEN_H - DIALOG_FRAME_HEIGHT)
+	image_container.size = Vector2(SCREEN_W, SCREEN_H - DIALOG_FRAME_HEIGHT)
+	image_container.clip_contents = true
 	image_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(image_container)
 	
@@ -167,7 +198,7 @@ func _build_ui() -> void:
 	text_label.bbcode_enabled = true
 	text_label.fit_content = false
 	text_label.scroll_active = false
-	text_label.position = Vector2(DIALOG_PADDING, SCREEN_H - DIALOG_FRAME_HEIGHT + DIALOG_PADDING)
+	text_label.position = Vector2(DIALOG_PADDING + 32, SCREEN_H - DIALOG_FRAME_HEIGHT + DIALOG_PADDING + 32)
 	text_label.custom_minimum_size = Vector2(text_width, DIALOG_FRAME_HEIGHT - DIALOG_PADDING * 2)
 	text_label.size = Vector2(text_width, DIALOG_FRAME_HEIGHT - DIALOG_PADDING * 2)
 	text_label.add_theme_font_override("normal_font", font_dot)
@@ -191,29 +222,75 @@ func _build_ui() -> void:
 	next_icon.modulate.a = 0.0
 	next_icon.visible = false
 	add_child(next_icon)
+	
+	tap_catcher = Control.new()
+	tap_catcher.set_anchors_preset(Control.PRESET_FULL_RECT)
+	tap_catcher.anchor_right = 1.0
+	tap_catcher.anchor_bottom = 1.0
+	tap_catcher.mouse_filter = Control.MOUSE_FILTER_STOP
+	tap_catcher.gui_input.connect(_on_tap_catcher_gui_input)
+	add_child(tap_catcher)
+	
+	skip_button = TextureButton.new()
+	skip_button.texture_normal = tex_skip_icon
+	skip_button.ignore_texture_size = true
+	skip_button.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
+	var skip_tex_size := tex_skip_icon.get_size()
+	var skip_w := SKIP_BTN_TARGET_H * skip_tex_size.x / maxf(skip_tex_size.y, 1.0)
+	skip_button.custom_minimum_size = Vector2(skip_w, SKIP_BTN_TARGET_H)
+	skip_button.size = Vector2(skip_w, SKIP_BTN_TARGET_H)
+	skip_button.position = Vector2(SCREEN_W - SKIP_BTN_MARGIN - skip_w, SKIP_BTN_MARGIN)
+	skip_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	skip_button.pressed.connect(_on_skip_pressed)
+	add_child(skip_button)
+	
+	var debug_btn := Button.new()
+	debug_btn.text = "DEBUG: Last Page"
+	debug_btn.add_theme_font_size_override("font_size", 20)
+	debug_btn.custom_minimum_size = Vector2(skip_w, SKIP_BTN_TARGET_H * 0.6)
+	debug_btn.size = Vector2(skip_w, SKIP_BTN_TARGET_H * 0.6)
+	debug_btn.position = Vector2(SCREEN_W - SKIP_BTN_MARGIN - skip_w, SKIP_BTN_MARGIN + SKIP_BTN_TARGET_H + 8)
+	debug_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	debug_btn.pressed.connect(_on_debug_last_page_pressed)
+	add_child(debug_btn)
 
 
 func start(text: String, on_complete: Callable = Callable()) -> void:
 	_full_text = text
 	_on_complete = on_complete
-	_pages = _parse_pages(text)
+	_parse_pages_with_transitions(text)
 	_current_page = 0
 	_show_page(0)
 
 
-func _parse_pages(text: String) -> Array[String]:
-	var pages: Array[String] = []
-	var parts := text.split("<next_page>")
-	for part in parts:
-		var trimmed := part.strip_edges()
-		if trimmed.length() > 0:
-			pages.append(trimmed)
-	if pages.is_empty():
-		pages.append("")
-	return pages
+func _parse_pages_with_transitions(text: String) -> void:
+	_pages = []
+	_page_transitions = []
+	_page_transition_durations = []
+	var regex := RegEx.new()
+	regex.compile("<next_page\\s*([^>]*)>")
+	var last_end := 0
+	for result in regex.search_all(text):
+		var page_text := text.substr(last_end, result.get_start() - last_end).strip_edges()
+		if page_text.length() > 0:
+			_pages.append(page_text)
+			var attrs := result.get_string(1)
+			_page_transitions.append(_extract_attr(attrs, "transition"))
+			var dur_str := _extract_attr(attrs, "transition_duration")
+			_page_transition_durations.append(float(dur_str) if dur_str != "" else FADE_DURATION)
+		last_end = result.get_end()
+	var remaining := text.substr(last_end).strip_edges()
+	if remaining.length() > 0:
+		_pages.append(remaining)
+		_page_transitions.append("")
+		_page_transition_durations.append(FADE_DURATION)
+	if _pages.is_empty():
+		_pages.append("")
+		_page_transitions.append("")
+		_page_transition_durations.append(FADE_DURATION)
 
 
-func _show_page(index: int) -> void:
+func _show_page(index: int, preprocess_tags: bool = false) -> void:
 	if index >= _pages.size():
 		_finish()
 		return
@@ -228,13 +305,26 @@ func _show_page(index: int) -> void:
 	_displayed_chars = 0
 	_is_typing = true
 	_skip_requested = false
+	_char_delay = CHAR_DELAY
 	text_label.text = ""
+	
+	if preprocess_tags:
+		_run_leading_tags()
+
+
+func _run_leading_tags() -> void:
+	while _segment_index < _parsed_segments.size():
+		var seg: Dictionary = _parsed_segments[_segment_index]
+		if seg.type == "text" or seg.type == "next_line" or seg.type == "space":
+			break
+		_advance_one_step()
 
 
 func _parse_segments(text: String) -> Array:
+	text = text.replace("\r", "").replace("\n", "")
 	var segments: Array = []
 	var regex := RegEx.new()
-	regex.compile("<(space|play|bgm|background_image|image|hide_image|clear_image|screen_effect)\\s*([^>]*)>")
+	regex.compile("<(space|play|bgm|background_image|image|hide_image|clear_image|screen_effect|next_line|text_speed)\\s*([^>]*)>")
 	
 	var last_end := 0
 	for result in regex.search_all(text):
@@ -257,22 +347,29 @@ func _parse_segments(text: String) -> Array:
 
 
 func _process(delta: float) -> void:
-	if not _is_typing:
+	if not _is_typing or _is_transitioning:
 		return
 	
 	_char_timer += delta
 	
-	while _char_timer >= CHAR_DELAY and _is_typing:
-		_char_timer -= CHAR_DELAY
+	while _is_typing:
+		if _segment_index >= _parsed_segments.size():
+			_is_typing = false
+			_show_next_icon()
+			return
+		
+		var segment: Dictionary = _parsed_segments[_segment_index]
+		var is_visible_step: bool = (segment.type == "text" or segment.type == "next_line" or segment.type == "space")
+		
+		if is_visible_step:
+			if _char_timer < _char_delay:
+				return
+			_char_timer -= _char_delay
+		
 		_advance_one_step()
 
 
 func _advance_one_step() -> void:
-	if _segment_index >= _parsed_segments.size():
-		_is_typing = false
-		_show_next_icon()
-		return
-	
 	var segment: Dictionary = _parsed_segments[_segment_index]
 	
 	match segment.type:
@@ -283,17 +380,26 @@ func _advance_one_step() -> void:
 				text_label.text += ch
 				_char_in_segment += 1
 				_displayed_chars += 1
+				if ch != " " and ch != "　":
+					_key_se_player.play()
 			else:
 				_segment_index += 1
 				_char_in_segment = 0
 		"space":
 			_char_timer = -SPACE_DELAY
 			_segment_index += 1
+		"next_line":
+			text_label.text += "\n"
+			_segment_index += 1
 		"play":
 			_handle_play(segment.attrs)
 			_segment_index += 1
 		"bgm":
-			_handle_bgm(segment.attrs)
+			var has_transition: bool = "transition" in segment.attrs
+			if has_transition:
+				_handle_bgm_transition(segment.attrs)
+			else:
+				_handle_bgm(segment.attrs)
 			_segment_index += 1
 		"background_image":
 			_handle_background_image(segment.attrs)
@@ -309,6 +415,10 @@ func _advance_one_step() -> void:
 			_segment_index += 1
 		"screen_effect":
 			_handle_screen_effect(segment.attrs)
+			_segment_index += 1
+		"text_speed":
+			var v := _extract_attr(segment.attrs, "v")
+			_char_delay = CHAR_DELAY / float(v) if v != "" and float(v) > 0.0 else CHAR_DELAY
 			_segment_index += 1
 		_:
 			_segment_index += 1
@@ -341,8 +451,61 @@ func _handle_bgm(attrs: String) -> void:
 			bgm_player = AudioStreamPlayer.new()
 			bgm_player.volume_db = -6.0
 			add_child(bgm_player)
+		if bgm_player.playing and bgm_player.stream and bgm_player.stream.resource_path == path:
+			return
 		bgm_player.stream = load(path)
+		if bgm_player.stream is AudioStreamMP3:
+			bgm_player.stream.loop = true
+		elif bgm_player.stream is AudioStreamOggVorbis:
+			bgm_player.stream.loop = true
 		bgm_player.play()
+
+
+func _handle_bgm_transition(attrs: String) -> void:
+	var id := _extract_attr(attrs, "id")
+	var dur_str := _extract_attr(attrs, "transition_duration")
+	var fade_dur := float(dur_str) if dur_str != "" and float(dur_str) > 0.0 else BGM_FADE_DURATION
+	var target_vol := -6.0
+	
+	if id == "":
+		if bgm_player and bgm_player.playing:
+			var fading_player := bgm_player
+			var tw := create_tween()
+			tw.tween_property(fading_player, "volume_db", -40.0, fade_dur)
+			tw.tween_callback(func():
+				fading_player.stop()
+				fading_player.volume_db = target_vol
+			)
+		return
+	
+	if not BGM_PATHS.has(id):
+		return
+	var path: String = BGM_PATHS[id]
+	
+	var new_player := AudioStreamPlayer.new()
+	new_player.stream = load(path)
+	if new_player.stream is AudioStreamMP3:
+		new_player.stream.loop = true
+	elif new_player.stream is AudioStreamOggVorbis:
+		new_player.stream.loop = true
+	new_player.volume_db = -40.0
+	add_child(new_player)
+	new_player.play()
+	
+	var old_player := bgm_player
+	bgm_player = new_player
+	
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(new_player, "volume_db", target_vol, fade_dur)
+	if old_player and old_player.playing:
+		tw.tween_property(old_player, "volume_db", -40.0, fade_dur)
+	tw.set_parallel(false)
+	tw.tween_callback(func():
+		if is_instance_valid(old_player):
+			old_player.stop()
+			old_player.queue_free()
+	)
 
 
 func _handle_background_image(attrs: String) -> void:
@@ -373,6 +536,11 @@ func _apply_image_rect(sprite: TextureRect, parts: PackedStringArray) -> void:
 	sprite.position = Vector2(x, y)
 	if parts.size() < 4:
 		sprite.stretch_mode = TextureRect.STRETCH_KEEP
+		var tex_only := sprite.texture as Texture2D
+		if tex_only:
+			var ts0 := tex_only.get_size()
+			sprite.custom_minimum_size = Vector2(ts0)
+			sprite.size = Vector2(ts0)
 		return
 	var w_tok := parts[2].strip_edges().to_lower()
 	var h_tok := parts[3].strip_edges().to_lower()
@@ -428,15 +596,34 @@ func _handle_image(attrs: String) -> void:
 	if id == "" or not IMAGE_PATHS.has(id):
 		return
 	
+	if overlay_images.has(id):
+		var old: TextureRect = overlay_images[id]
+		if is_instance_valid(old):
+			old.queue_free()
+		overlay_images.erase(id)
+	
 	var rect_str := _extract_attr(attrs, "rect")
 	var parts := _rect_tokens(rect_str)
+	var z_str := _extract_attr(attrs, "z")
+	var z_val := int(z_str) if z_str != "" else 0
 	
 	var sprite := TextureRect.new()
 	sprite.texture = load(IMAGE_PATHS[id])
+	sprite.ignore_texture_size = true
 	sprite.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	sprite.set_meta("z_index", z_val)
 	_apply_image_rect(sprite, parts)
 	
+	var insert_idx := image_container.get_child_count()
+	for i in range(image_container.get_child_count()):
+		var child := image_container.get_child(i)
+		var child_z: int = child.get_meta("z_index", 0)
+		if z_val < child_z:
+			insert_idx = i
+			break
 	image_container.add_child(sprite)
+	if insert_idx < image_container.get_child_count() - 1:
+		image_container.move_child(sprite, insert_idx)
 	overlay_images[id] = sprite
 
 
@@ -448,9 +635,9 @@ func _handle_hide_image(attrs: String) -> void:
 
 
 func _handle_clear_image() -> void:
-	for sprite in overlay_images.values():
-		if is_instance_valid(sprite):
-			sprite.queue_free()
+	for child in image_container.get_children():
+		if is_instance_valid(child):
+			child.queue_free()
 	overlay_images.clear()
 
 
@@ -498,29 +685,36 @@ func _extract_attr(attrs: String, name: String) -> String:
 	return ""
 
 
-func _input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed:
-		if event.button_index == MOUSE_BUTTON_LEFT:
-			_on_click()
-	elif event is InputEventKey and event.pressed:
+func _on_tap_catcher_gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_on_click()
+		accept_event()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed:
 		if event.keycode == KEY_SPACE or event.keycode == KEY_ENTER:
 			_on_click()
 
 
 func _on_click() -> void:
+	if _is_transitioning:
+		return
 	if _is_typing:
 		_skip_to_end()
 	else:
 		_next_page()
 
 
-func _skip_to_end() -> void:
-	_is_typing = false
-	
+func _apply_segments_skipped(segments: Array, collect_text: bool) -> String:
 	var display_text := ""
-	for segment in _parsed_segments:
+	for segment in segments:
 		if segment.type == "text":
-			display_text += segment.content
+			if collect_text:
+				display_text += segment.content
+		elif segment.type == "next_line":
+			if collect_text:
+				display_text += "\n"
 		elif segment.type == "background_image":
 			_handle_background_image(segment.attrs)
 		elif segment.type == "image":
@@ -531,17 +725,61 @@ func _skip_to_end() -> void:
 			_handle_clear_image()
 		elif segment.type == "bgm":
 			_handle_bgm(segment.attrs)
-	
-	text_label.text = display_text
+	return display_text
+
+
+func _skip_to_end() -> void:
+	_is_typing = false
+	text_label.text = _apply_segments_skipped(_parsed_segments, true)
 	_show_next_icon()
 
 
+func _skip_entire_novel() -> void:
+	_is_typing = false
+	_hide_next_icon()
+	var last_text := ""
+	for p in range(_pages.size()):
+		var segs := _parse_segments(_pages[p])
+		var is_last := p == _pages.size() - 1
+		var page_text := _apply_segments_skipped(segs, is_last)
+		if is_last:
+			last_text = page_text
+	text_label.text = last_text
+	_current_page = _pages.size()
+	_finish()
+
+
+func _on_skip_pressed() -> void:
+	_skip_entire_novel()
+
+
+func _on_debug_last_page_pressed() -> void:
+	_is_typing = false
+	_hide_next_icon()
+	for p in range(_pages.size() - 1):
+		var segs := _parse_segments(_pages[p])
+		_apply_segments_skipped(segs, false)
+	_show_page(_pages.size() - 1)
+
+
 func _next_page() -> void:
+	var transition_type := ""
+	var transition_dur := FADE_DURATION
+	if _current_page >= 0 and _current_page < _page_transitions.size():
+		transition_type = _page_transitions[_current_page]
+		transition_dur = _page_transition_durations[_current_page]
+	
 	_current_page += 1
 	if _current_page >= _pages.size():
-		_finish()
+		if transition_type != "":
+			_do_page_transition(transition_type, transition_dur, func(): _finish(), true)
+		else:
+			_finish()
 	else:
-		_show_page(_current_page)
+		if transition_type != "":
+			_do_page_transition(transition_type, transition_dur, func(): _show_page(_current_page, true), false)
+		else:
+			_show_page(_current_page)
 
 
 func _show_next_icon() -> void:
@@ -571,6 +809,36 @@ func _hide_next_icon() -> void:
 	
 	next_icon.visible = false
 	next_icon.modulate.a = 0.0
+
+
+func _do_page_transition(color_name: String, duration: float, on_mid: Callable, skip_fade_out: bool) -> void:
+	_is_transitioning = true
+	var color := Color.BLACK if color_name == "black" else Color.WHITE
+	
+	if not _transition_overlay:
+		_transition_overlay = ColorRect.new()
+		_transition_overlay.size = Vector2(SCREEN_W, SCREEN_H)
+		_transition_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(_transition_overlay)
+	_transition_overlay.color = color
+	_transition_overlay.modulate.a = 0.0
+	_transition_overlay.visible = true
+	move_child(_transition_overlay, get_child_count() - 1)
+	
+	var tw := create_tween()
+	tw.tween_property(_transition_overlay, "modulate:a", 1.0, duration)
+	tw.tween_callback(on_mid)
+	if skip_fade_out:
+		tw.tween_callback(func():
+			_transition_overlay.visible = false
+			_is_transitioning = false
+		)
+	else:
+		tw.tween_property(_transition_overlay, "modulate:a", 0.0, duration)
+		tw.tween_callback(func():
+			_transition_overlay.visible = false
+			_is_transitioning = false
+		)
 
 
 func _finish() -> void:
