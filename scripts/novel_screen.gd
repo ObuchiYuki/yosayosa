@@ -103,9 +103,10 @@ const DIALOG_FRAME_HEIGHT := roundi(float(SCREEN_W) * float(DIALOG_FRAME_TEX_H) 
 const DIALOG_PADDING := 30
 const FONT_SIZE := 52
 const LINE_SPACING := 24
-const CHAR_DELAY := 0.04
+const CHAR_DELAY := 0.05
 const SPACE_DELAY := 0.3
 const NEXT_ICON_SIZE := 176
+const NEXT_ICON_DELAY := 0.5
 const NEXT_ICON_MARGIN := 16
 const SKIP_BTN_MARGIN := 20
 const SKIP_BTN_TARGET_H := 72.0
@@ -146,6 +147,7 @@ var _current_page_text: String = ""
 var _parsed_segments: Array = []
 var _segment_index: int = 0
 var _char_in_segment: int = 0
+var _next_icon_delay_remaining: float = 0.0
 
 
 func _ready() -> void:
@@ -156,6 +158,7 @@ func _build_ui() -> void:
 	_key_se_player = AudioStreamPlayer.new()
 	_key_se_player.stream = load("res://assets/audio/se/se_key.mp3")
 	_key_se_player.volume_db = -10.0
+	_key_se_player.bus = "SE"
 	add_child(_key_se_player)
 	
 	bg_sprite = TextureRect.new()
@@ -243,16 +246,6 @@ func _build_ui() -> void:
 	skip_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	skip_button.pressed.connect(_on_skip_pressed)
 	add_child(skip_button)
-	
-	var debug_btn := Button.new()
-	debug_btn.text = "DEBUG: Last Page"
-	debug_btn.add_theme_font_size_override("font_size", 20)
-	debug_btn.custom_minimum_size = Vector2(skip_w, SKIP_BTN_TARGET_H * 0.6)
-	debug_btn.size = Vector2(skip_w, SKIP_BTN_TARGET_H * 0.6)
-	debug_btn.position = Vector2(SCREEN_W - SKIP_BTN_MARGIN - skip_w, SKIP_BTN_MARGIN + SKIP_BTN_TARGET_H + 8)
-	debug_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	debug_btn.pressed.connect(_on_debug_last_page_pressed)
-	add_child(debug_btn)
 
 
 func start(text: String, on_complete: Callable = Callable()) -> void:
@@ -296,6 +289,7 @@ func _show_page(index: int, preprocess_tags: bool = false) -> void:
 		return
 	
 	_hide_next_icon()
+	_next_icon_delay_remaining = 0.0
 	
 	_current_page = index
 	_current_page_text = _pages[index]
@@ -347,7 +341,15 @@ func _parse_segments(text: String) -> Array:
 
 
 func _process(delta: float) -> void:
-	if not _is_typing or _is_transitioning:
+	if _is_transitioning:
+		return
+	if _next_icon_delay_remaining > 0.0:
+		_next_icon_delay_remaining -= delta
+		if _next_icon_delay_remaining <= 0.0:
+			_next_icon_delay_remaining = 0.0
+			_show_next_icon()
+		return
+	if not _is_typing:
 		return
 	
 	_char_timer += delta
@@ -355,7 +357,7 @@ func _process(delta: float) -> void:
 	while _is_typing:
 		if _segment_index >= _parsed_segments.size():
 			_is_typing = false
-			_show_next_icon()
+			_next_icon_delay_remaining = NEXT_ICON_DELAY
 			return
 		
 		var segment: Dictionary = _parsed_segments[_segment_index]
@@ -434,6 +436,7 @@ func _handle_play(attrs: String) -> void:
 			var player := AudioStreamPlayer.new()
 			player.stream = load(path)
 			player.volume_db = -6.0
+			player.bus = "SE"
 			add_child(player)
 			se_players[id] = player
 		se_players[id].play()
@@ -450,6 +453,7 @@ func _handle_bgm(attrs: String) -> void:
 		if not bgm_player:
 			bgm_player = AudioStreamPlayer.new()
 			bgm_player.volume_db = -6.0
+			bgm_player.bus = "BGM"
 			add_child(bgm_player)
 		if bgm_player.playing and bgm_player.stream and bgm_player.stream.resource_path == path:
 			return
@@ -489,6 +493,7 @@ func _handle_bgm_transition(attrs: String) -> void:
 	elif new_player.stream is AudioStreamOggVorbis:
 		new_player.stream.loop = true
 	new_player.volume_db = -40.0
+	new_player.bus = "BGM"
 	add_child(new_player)
 	new_player.play()
 	
@@ -700,6 +705,10 @@ func _unhandled_input(event: InputEvent) -> void:
 func _on_click() -> void:
 	if _is_transitioning:
 		return
+	if _next_icon_delay_remaining > 0.0:
+		_next_icon_delay_remaining = 0.0
+		_show_next_icon()
+		return
 	if _is_typing:
 		_skip_to_end()
 	else:
@@ -731,7 +740,7 @@ func _apply_segments_skipped(segments: Array, collect_text: bool) -> String:
 func _skip_to_end() -> void:
 	_is_typing = false
 	text_label.text = _apply_segments_skipped(_parsed_segments, true)
-	_show_next_icon()
+	_next_icon_delay_remaining = NEXT_ICON_DELAY
 
 
 func _skip_entire_novel() -> void:
@@ -751,15 +760,6 @@ func _skip_entire_novel() -> void:
 
 func _on_skip_pressed() -> void:
 	_skip_entire_novel()
-
-
-func _on_debug_last_page_pressed() -> void:
-	_is_typing = false
-	_hide_next_icon()
-	for p in range(_pages.size() - 1):
-		var segs := _parse_segments(_pages[p])
-		_apply_segments_skipped(segs, false)
-	_show_page(_pages.size() - 1)
 
 
 func _next_page() -> void:
@@ -842,6 +842,7 @@ func _do_page_transition(color_name: String, duration: float, on_mid: Callable, 
 
 
 func _finish() -> void:
+	_next_icon_delay_remaining = 0.0
 	_hide_next_icon()
 	novel_finished.emit()
 	if _on_complete.is_valid():

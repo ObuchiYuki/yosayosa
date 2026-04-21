@@ -1,0 +1,42 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://scripts/stage/stage_scene.gd" id="1_ss"]
+[ext_resource type="Script" path="res://scripts/stage/start_point_object.gd" id="2_sp"]
+[ext_resource type="Script" path="res://scripts/stage/goal_object.gd" id="3_go"]
+[ext_resource type="Script" path="res://scripts/stage/moving_platform_object.gd" id="8_mp"]
+[ext_resource type="Script" path="res://scripts/stage/enemy_zone_object.gd" id="6_ez"]
+[ext_resource type="Script" path="res://scripts/stage/refire_mirror_object.gd" id="7_rm"]
+
+[node name="StageScene" type="Node2D"]
+script = ExtResource("1_ss")
+stage_name = "移動壁と敵"
+mirror_count = 2
+grid_cols = 26
+grid_rows = 18
+
+[node name="StartPoint" type="Node2D" parent="."]
+script = ExtResource("2_sp")
+grid_pos = Vector2i(0, 8)
+
+[node name="Goal" type="Node2D" parent="."]
+script = ExtResource("3_go")
+grid_pos = Vector2i(24, 8)
+
+[node name="MovingPlatform1" type="Node2D" parent="."]
+script = ExtResource("8_mp")
+grid_pos = Vector2i(10, 6)
+block_size = Vector2i(2, 6)
+move_axis = "x"
+range_min_cell = 6
+range_max_cell = 14
+speed_factor = 1.5
+
+[node name="EnemyZone1" type="Node2D" parent="."]
+script = ExtResource("6_ez")
+grid_pos = Vector2i(18, 6)
+zone_size = Vector2i(2, 6)
+enemy_id = "slime"
+
+[node name="RefireMirror1" type="Node2D" parent="."]
+script = ExtResource("7_rm")
+grid_pos = Vector2i(12, 0)

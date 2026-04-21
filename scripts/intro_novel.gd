@@ -216,6 +216,7 @@ func _ready() -> void:
 
 
 func _on_intro_complete() -> void:
+	GameManager.mark_op_watched()
 	GameManager.is_debug_mode = false
 	GameManager.current_stage = 1
 	if GameManager.get_max_stage() > 0:

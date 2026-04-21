@@ -29,6 +29,7 @@ func _setup_audio() -> void:
 	_se_applause = AudioStreamPlayer.new()
 	_se_applause.stream = load("res://assets/audio/se_clear_applause.mp3")
 	_se_applause.volume_db = -5.0
+	_se_applause.bus = "SE"
 	add_child(_se_applause)
 	_se_applause.play()
 

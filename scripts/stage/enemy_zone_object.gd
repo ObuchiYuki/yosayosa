@@ -1,3 +1,4 @@
+@tool
 class_name EnemyZoneObject
 extends StageObject
 
@@ -17,9 +18,46 @@ const ENEMY_TEXTURES := {
 	"tentacle": "res://assets/sprites/enemy/tentacle.png",
 }
 
-var zone_size: Vector2i = Vector2i(1, 1)
-var enemy_id: String = ""
+@export var zone_size: Vector2i = Vector2i(1, 1):
+	set(value):
+		zone_size = value
+		_update_editor_transform()
+
+@export var enemy_id: String = "":
+	set(value):
+		enemy_id = value
+		_editor_enemy_tex = null
+		if Engine.is_editor_hint():
+			_load_editor_enemy_tex()
+			queue_redraw()
+
 var _rect: Rect2
+var _editor_enemy_tex: Texture2D
+
+
+func _ready() -> void:
+	super._ready()
+	if Engine.is_editor_hint():
+		_load_editor_enemy_tex()
+
+
+func _load_editor_enemy_tex() -> void:
+	if enemy_id != "" and ENEMY_TEXTURES.has(enemy_id):
+		_editor_enemy_tex = load(ENEMY_TEXTURES[enemy_id])
+
+
+func _calc_snapped_grid_pos(scene: StageScene) -> Vector2i:
+	if not get_parent() is StageScene:
+		return super._calc_snapped_grid_pos(scene)
+	var cw_f := scene.cw()
+	var ch_f := scene.ch()
+	var local_x := position.x - StageScene._STAGE_X
+	var local_y := position.y - StageScene._STAGE_Y
+	var col := int(floor(local_x / cw_f + 0.5))
+	var row := int(floor(local_y / ch_f + 0.5))
+	return Vector2i(
+		clampi(col, 0, scene.grid_cols - zone_size.x),
+		clampi(row, 0, scene.grid_rows - zone_size.y))
 
 
 static func create(pos: Vector2i, size: Vector2i, id: String = "") -> EnemyZoneObject:
@@ -68,5 +106,31 @@ func _build() -> void:
 	z_index = 1
 
 
+func _draw() -> void:
+	if not Engine.is_editor_hint():
+		return
+	var cs := _editor_cell_size()
+	var w := zone_size.x * cs.x
+	var h := zone_size.y * cs.y
+
+	draw_rect(Rect2(0, 0, w, h), BG_COLOR, true)
+	if _editor_enemy_tex:
+		var tex_w := float(_editor_enemy_tex.get_width())
+		var tex_h := float(_editor_enemy_tex.get_height())
+		var sc := minf(w / tex_w, h / tex_h) * 0.85
+		var tex_size := Vector2(tex_w, tex_h) * sc
+		var offset := (Vector2(w, h) - tex_size) / 2.0
+		draw_texture_rect(_editor_enemy_tex, Rect2(offset.x, offset.y, tex_size.x, tex_size.y), false)
+	draw_rect(Rect2(0, 0, w, h), Color(0.9, 0.3, 0.2, 0.9), false, 2.0)
+	var font := ThemeDB.fallback_font
+	if font:
+		var label := enemy_id if enemy_id != "" else "ENEMY"
+		draw_string(font, Vector2(4, 16), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color.WHITE)
+
+
 func snapshot() -> Array[Dictionary]:
 	return [{"type": "enemy", "rect": _rect, "enemy_id": enemy_id}]
+
+
+func refresh_collision_data() -> void:
+	_rect.position = position

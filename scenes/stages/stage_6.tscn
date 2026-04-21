@@ -1,0 +1,62 @@
+[gd_scene format=3 uid="uid://dyw2ufaec51qm"]
+
+[ext_resource type="Script" uid="uid://d0uvi1xtlnph4" path="res://scripts/stage/stage_scene.gd" id="1_igwyt"]
+[ext_resource type="Script" uid="uid://d1080rq6t3woo" path="res://scripts/stage/wall_block_object.gd" id="3_ur40f"]
+[ext_resource type="Script" uid="uid://d0rgh3rdq01lp" path="res://scripts/stage/enemy_zone_object.gd" id="4_j1wux"]
+[ext_resource type="Script" uid="uid://dg4elsgehhe8k" path="res://scripts/stage/goal_object.gd" id="5_rt1ky"]
+[ext_resource type="Script" uid="uid://vn2ao405vdt0" path="res://scripts/stage/start_point_object.gd" id="6_kwfj4"]
+[ext_resource type="Script" uid="uid://b0fbrex5r8q66" path="res://scripts/stage/mirror_wall_object.gd" id="7_uuxkk"]
+
+[node name="StageScene" type="Node2D" unique_id=354849106]
+script = ExtResource("1_igwyt")
+stage_name = "感覚遮断何か"
+stage_title = "2"
+mirror_count = 4
+inv_capacity = 4
+
+[node name="EnemyZoneObject2" type="Node2D" parent="." unique_id=1273207425]
+position = Vector2(1413.6154, 72)
+script = ExtResource("4_j1wux")
+zone_size = Vector2i(2, 4)
+enemy_id = "jellyfish"
+grid_pos = Vector2i(24, 0)
+metadata/_custom_type_script = "uid://d0rgh3rdq01lp"
+
+[node name="Goal" type="Node2D" parent="." unique_id=1072480350]
+position = Vector2(121.19231, 852.8333)
+script = ExtResource("5_rt1ky")
+grid_pos = Vector2i(1, 15)
+
+[node name="MirrorWallObject" type="Node2D" parent="." unique_id=3560172]
+position = Vector2(233.57692, 488.44446)
+script = ExtResource("7_uuxkk")
+block_size = Vector2i(19, 2)
+mirror_top = true
+grid_pos = Vector2i(3, 8)
+
+[node name="MirrorWallObject2" type="Node2D" parent="." unique_id=391269285]
+position = Vector2(233.57692, 72)
+script = ExtResource("7_uuxkk")
+block_size = Vector2i(21, 2)
+mirror_bottom = true
+grid_pos = Vector2i(3, 0)
+
+[node name="MirrorWallObject3" type="Node2D" parent="." unique_id=1179030952]
+position = Vector2(233.57692, 280.22223)
+script = ExtResource("7_uuxkk")
+block_size = Vector2i(23, 2)
+mirror_top = true
+mirror_bottom = true
+grid_pos = Vector2i(3, 4)
+
+[node name="Wall1" type="Node2D" parent="." unique_id=71613786]
+position = Vector2(233.57692, 540.5)
+script = ExtResource("3_ur40f")
+block_size = Vector2i(3, 9)
+grid_pos = Vector2i(3, 9)
+
+[node name="StartPointObject" type="Node2D" parent="." unique_id=1907894554]
+position = Vector2(683.11536, 592.55554)
+script = ExtResource("6_kwfj4")
+grid_pos = Vector2i(11, 10)
+metadata/_custom_type_script = "uid://vn2ao405vdt0"

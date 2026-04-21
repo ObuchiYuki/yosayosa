@@ -1,0 +1,63 @@
+[gd_scene format=3 uid="uid://dtf63hayd2uq8"]
+
+[ext_resource type="Script" uid="uid://d0uvi1xtlnph4" path="res://scripts/stage/stage_scene.gd" id="1_o6huk"]
+[ext_resource type="Script" uid="uid://d1080rq6t3woo" path="res://scripts/stage/wall_block_object.gd" id="3_7u8a8"]
+[ext_resource type="Script" uid="uid://vn2ao405vdt0" path="res://scripts/stage/start_point_object.gd" id="4_c8pbq"]
+[ext_resource type="Script" uid="uid://d0rgh3rdq01lp" path="res://scripts/stage/enemy_zone_object.gd" id="5_ocglh"]
+[ext_resource type="Script" uid="uid://dg4elsgehhe8k" path="res://scripts/stage/goal_object.gd" id="6_d60ab"]
+[ext_resource type="Script" uid="uid://cl3bhsmv7rf73" path="res://scripts/stage/water_source_object.gd" id="6_o6huk"]
+
+[node name="StageScene" type="Node2D" unique_id=354849106]
+script = ExtResource("1_o6huk")
+stage_name = "感覚遮断何か"
+stage_title = "2"
+mirror_count = 3
+inv_capacity = 3
+
+[node name="StartPointObject" type="Node2D" parent="." unique_id=1504374253]
+position = Vector2(964.0769, 436.3889)
+script = ExtResource("4_c8pbq")
+grid_pos = Vector2i(16, 7)
+metadata/_custom_type_script = "uid://vn2ao405vdt0"
+
+[node name="EnemyZoneObject2" type="Node2D" parent="." unique_id=1273207425]
+position = Vector2(65, 800.7778)
+script = ExtResource("5_ocglh")
+zone_size = Vector2i(2, 4)
+enemy_id = "gorilla"
+grid_pos = Vector2i(0, 14)
+metadata/_custom_type_script = "uid://d0rgh3rdq01lp"
+
+[node name="Goal" type="Node2D" parent="." unique_id=1072480350]
+position = Vector2(1413.6154, 124.05556)
+script = ExtResource("6_d60ab")
+grid_pos = Vector2i(24, 1)
+
+[node name="Wall1" type="Node2D" parent="." unique_id=71613786]
+position = Vector2(795.5, 696.6667)
+script = ExtResource("3_7u8a8")
+block_size = Vector2i(2, 6)
+grid_pos = Vector2i(13, 12)
+
+[node name="Wall3" type="Node2D" parent="." unique_id=803353752]
+position = Vector2(289.76923, 72)
+script = ExtResource("3_7u8a8")
+block_size = Vector2i(2, 10)
+grid_pos = Vector2i(4, 0)
+
+[node name="Wall5" type="Node2D" parent="." unique_id=1422368758]
+position = Vector2(795.5, 280.22223)
+script = ExtResource("3_7u8a8")
+block_size = Vector2i(2, 6)
+grid_pos = Vector2i(13, 4)
+
+[node name="Wall2" type="Node2D" parent="." unique_id=1065088581]
+position = Vector2(907.88464, 280.22223)
+script = ExtResource("3_7u8a8")
+block_size = Vector2i(11, 3)
+grid_pos = Vector2i(15, 4)
+
+[node name="WaterSourceObject" type="Node2D" parent="." unique_id=2069357177]
+position = Vector2(177.38461, 72)
+script = ExtResource("6_o6huk")
+grid_pos = Vector2i(2, 0)

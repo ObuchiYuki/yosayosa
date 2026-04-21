@@ -36,6 +36,9 @@ static func calc_light_path(
 				end_reason = "enemy"
 				hit_enemy_id = hit.get("enemy_id", "")
 				break
+			"water":
+				end_reason = "water"
+				break
 			_:
 				end_reason = hit.type if hit.type in ["wall", "boundary"] else "boundary"
 				break
@@ -95,12 +98,30 @@ static func _find_nearest_hit(
 						result = {"point": mh.point, "type": "wall",
 								  "normal": mh.normal, "reflected": Vector2.ZERO}
 
+			"mirror_edge":
+				var meh := _seg_intersect(from, from + dir * RAY_LENGTH, obj.p1, obj.p2)
+				if meh.hit and meh.dist < nearest_dist and meh.dist > 2.0:
+					var me_n: Vector2 = obj.normal
+					var me_dot := dir.dot(me_n)
+					if me_dot < 0:
+						var me_ref: Vector2 = dir - 2.0 * me_dot * me_n
+						nearest_dist = meh.dist
+						result = {"point": meh.point, "type": "mirror",
+								  "normal": me_n, "reflected": me_ref}
+
 			"wall", "moving_wall":
 				var wh := _hit_rect(from, dir, obj.rect)
 				if wh.hit and wh.dist < nearest_dist:
 					nearest_dist = wh.dist
 					result = {"point": wh.point, "type": "wall",
 							  "normal": wh.normal, "reflected": Vector2.ZERO}
+
+			"water":
+				var wth := _hit_rect(from, dir, obj.rect)
+				if wth.hit and wth.dist < nearest_dist:
+					nearest_dist = wth.dist
+					result = {"point": wth.point, "type": "water",
+							  "normal": wth.normal, "reflected": Vector2.ZERO}
 
 			"enemy":
 				var eh := _hit_rect(from, dir, obj.rect)

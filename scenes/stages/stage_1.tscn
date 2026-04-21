@@ -1,0 +1,21 @@
+[gd_scene format=3 uid="uid://cq3yeungugou7"]
+
+[ext_resource type="Script" uid="uid://d0uvi1xtlnph4" path="res://scripts/stage/stage_scene.gd" id="1_ss"]
+[ext_resource type="Script" uid="uid://vn2ao405vdt0" path="res://scripts/stage/start_point_object.gd" id="2_sp"]
+[ext_resource type="Script" uid="uid://dg4elsgehhe8k" path="res://scripts/stage/goal_object.gd" id="3_go"]
+
+[node name="StageScene" type="Node2D" unique_id=409714204]
+script = ExtResource("1_ss")
+stage_name = "チュートリアル1"
+stage_title = "1"
+pre_info = "how_to_play_1"
+
+[node name="StartPoint" type="Node2D" parent="." unique_id=501191816]
+position = Vector2(739.3077, 228.16667)
+script = ExtResource("2_sp")
+grid_pos = Vector2i(12, 3)
+
+[node name="Goal" type="Node2D" parent="." unique_id=2070027958]
+position = Vector2(739.3077, 800.7778)
+script = ExtResource("3_go")
+grid_pos = Vector2i(12, 14)

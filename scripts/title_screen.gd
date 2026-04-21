@@ -54,6 +54,7 @@ func _start_bgm() -> void:
 	stream.loop = true
 	player.stream = stream
 	player.volume_db = -6.0
+	player.bus = "BGM"
 	player.autoplay = true
 	add_child(player)
 	player.play()
@@ -160,7 +161,7 @@ func _on_cmd_pressed(index: int) -> void:
 		0:  # はじめる → スタートメニュー表示
 			_show_start_menu()
 		1:  # ギャラリー
-			GameManager.change_scene("res://scenes/blank_screen.tscn")
+			GameManager.change_scene("res://scenes/gallery.tscn")
 		2:  # オプション
 			GameManager.change_scene("res://scenes/blank_screen.tscn")
 		3:  # おわる
@@ -200,19 +201,15 @@ func _add_start_menu_buttons() -> void:
 	
 	var btn_continue := HoverButton.create(tex_btn_continue, btn_size)
 	btn_continue.position = Vector2(center_x, start_y + btn_size.y + spacing)
-	btn_continue.pressed.connect(func():
-		GameManager.play_click_se()
-	)
+
+	var has_save: bool = int(GameManager.save_data["max_cleared_stage"]) > 0 or bool(GameManager.save_data["op_watched"])
+	if has_save:
+		btn_continue.pressed.connect(func():
+			GameManager.play_click_se()
+			GameManager.is_debug_mode = false
+			GameManager.change_scene("res://scenes/stage_select.tscn")
+		)
+	else:
+		btn_continue.modulate.a = 0.35
+		btn_continue.disabled = true
 	start_overlay.add_child(btn_continue)
-	
-	var debug_btn := Button.new()
-	debug_btn.text = "Debug"
-	debug_btn.custom_minimum_size = Vector2(80, 30)
-	debug_btn.add_theme_font_size_override("font_size", 14)
-	debug_btn.modulate.a = 0.6
-	debug_btn.pressed.connect(func():
-		GameManager.play_click_se()
-		GameManager.change_scene("res://scenes/debug_menu.tscn")
-	)
-	start_overlay.add_child(debug_btn)
-	debug_btn.position = Vector2(1920 - 100, 1080 - 50)

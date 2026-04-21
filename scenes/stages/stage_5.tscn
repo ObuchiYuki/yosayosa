@@ -1,0 +1,85 @@
+[gd_scene format=3 uid="uid://bq4p1r1n0ehvb"]
+
+[ext_resource type="Script" uid="uid://d0uvi1xtlnph4" path="res://scripts/stage/stage_scene.gd" id="1_df1c4"]
+[ext_resource type="Script" uid="uid://dr8bhu6lw4jy4" path="res://scripts/stage/mirror_object.gd" id="2_m1r7o"]
+[ext_resource type="Script" uid="uid://d1080rq6t3woo" path="res://scripts/stage/wall_block_object.gd" id="3_583hl"]
+[ext_resource type="Script" uid="uid://d0rgh3rdq01lp" path="res://scripts/stage/enemy_zone_object.gd" id="4_a7y5j"]
+[ext_resource type="Script" uid="uid://dg4elsgehhe8k" path="res://scripts/stage/goal_object.gd" id="5_de4wp"]
+[ext_resource type="Script" uid="uid://vn2ao405vdt0" path="res://scripts/stage/start_point_object.gd" id="6_6u4xm"]
+[ext_resource type="Script" uid="uid://ck88f0nysjpet" path="res://scripts/stage/groove_object.gd" id="7_m1r7o"]
+
+[node name="StageScene" type="Node2D" unique_id=354849106]
+script = ExtResource("1_df1c4")
+stage_name = "感覚遮断何か"
+stage_title = "2"
+mirror_count = 3
+inv_capacity = 3
+
+[node name="MirrorObject" type="Node2D" parent="." unique_id=1318508719]
+position = Vector2(1020.2692, 124.05556)
+script = ExtResource("2_m1r7o")
+angle_deg = 225
+grid_pos = Vector2i(17, 1)
+metadata/_custom_type_script = "uid://dr8bhu6lw4jy4"
+
+[node name="Wall1" type="Node2D" parent="." unique_id=71613786]
+position = Vector2(65, 280.22223)
+script = ExtResource("3_583hl")
+block_size = Vector2i(10, 12)
+grid_pos = Vector2i(0, 4)
+
+[node name="Wall5" type="Node2D" parent="." unique_id=1417678302]
+position = Vector2(851.6923, 280.22223)
+script = ExtResource("3_583hl")
+block_size = Vector2i(2, 14)
+grid_pos = Vector2i(14, 4)
+
+[node name="Wall7" type="Node2D" parent="." unique_id=1883911]
+position = Vector2(1188.8462, 72)
+script = ExtResource("3_583hl")
+block_size = Vector2i(2, 15)
+grid_pos = Vector2i(20, 0)
+
+[node name="EnemyZoneObject2" type="Node2D" parent="." unique_id=1273207425]
+position = Vector2(65, 904.8889)
+script = ExtResource("4_a7y5j")
+zone_size = Vector2i(4, 2)
+enemy_id = "worm"
+grid_pos = Vector2i(0, 16)
+metadata/_custom_type_script = "uid://d0rgh3rdq01lp"
+
+[node name="Goal" type="Node2D" parent="." unique_id=1072480350]
+position = Vector2(121.19231, 124.05556)
+script = ExtResource("5_de4wp")
+grid_pos = Vector2i(1, 1)
+
+[node name="StartPointObject" type="Node2D" parent="." unique_id=1907894554]
+position = Vector2(1357.4231, 124.05556)
+script = ExtResource("6_6u4xm")
+grid_pos = Vector2i(23, 1)
+metadata/_custom_type_script = "uid://vn2ao405vdt0"
+
+[node name="GrooveObject4" type="Node2D" parent="." unique_id=1599558339]
+position = Vector2(345.96155, 904.8889)
+script = ExtResource("7_m1r7o")
+slide_speed = 150.0
+slide_end_padding_px = -8.0
+groove_length = 8
+is_horizontal = true
+grid_pos = Vector2i(5, 16)
+metadata/_custom_type_script = "uid://ck88f0nysjpet"
+
+[node name="GrooveObject5" type="Node2D" parent="." unique_id=2097778598]
+position = Vector2(1020.2692, 540.5)
+script = ExtResource("7_m1r7o")
+slide_speed = 150.0
+groove_length = 8
+grid_pos = Vector2i(17, 9)
+metadata/_custom_type_script = "uid://ck88f0nysjpet"
+
+[node name="MirrorObject2" type="Node2D" parent="." unique_id=151186934]
+position = Vector2(1020.2692, 904.8889)
+script = ExtResource("2_m1r7o")
+angle_deg = 45
+grid_pos = Vector2i(17, 16)
+metadata/_custom_type_script = "uid://dr8bhu6lw4jy4"

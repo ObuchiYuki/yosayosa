@@ -1,0 +1,50 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/stage/stage_scene.gd" id="1_ss"]
+[ext_resource type="Script" path="res://scripts/stage/start_point_object.gd" id="2_sp"]
+[ext_resource type="Script" path="res://scripts/stage/goal_object.gd" id="3_go"]
+[ext_resource type="Script" path="res://scripts/stage/wall_block_object.gd" id="4_wb"]
+[ext_resource type="Script" path="res://scripts/stage/mirror_object.gd" id="5_mo"]
+
+[node name="StageScene" type="Node2D"]
+script = ExtResource("1_ss")
+stage_name = "回収テスト"
+mirror_count = 1
+inv_capacity = 4
+grid_cols = 26
+grid_rows = 18
+
+[node name="StartPoint" type="Node2D" parent="."]
+script = ExtResource("2_sp")
+grid_pos = Vector2i(0, 8)
+
+[node name="Goal" type="Node2D" parent="."]
+script = ExtResource("3_go")
+grid_pos = Vector2i(24, 8)
+
+[node name="Wall1" type="Node2D" parent="."]
+script = ExtResource("4_wb")
+grid_pos = Vector2i(12, 0)
+block_size = Vector2i(2, 8)
+
+[node name="Wall2" type="Node2D" parent="."]
+script = ExtResource("4_wb")
+grid_pos = Vector2i(12, 10)
+block_size = Vector2i(2, 8)
+
+[node name="PlacedMirror1" type="Node2D" parent="."]
+script = ExtResource("5_mo")
+grid_pos = Vector2i(6, 4)
+angle_deg = 45
+is_fixed = false
+
+[node name="PlacedMirror2" type="Node2D" parent="."]
+script = ExtResource("5_mo")
+grid_pos = Vector2i(6, 12)
+angle_deg = 315
+is_fixed = false
+
+[node name="FixedMirror1" type="Node2D" parent="."]
+script = ExtResource("5_mo")
+grid_pos = Vector2i(18, 4)
+angle_deg = 315

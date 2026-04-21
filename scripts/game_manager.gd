@@ -11,12 +11,12 @@ const STAGE_Y: int = 72
 const STAGE_W: int = 1461
 const STAGE_H: int = 937
 
-const GRID_COLS_SMALL: int = 13
-const GRID_ROWS_SMALL: int = 9
-const GRID_COLS_MEDIUM: int = 16
-const GRID_ROWS_MEDIUM: int = 10
-const GRID_COLS_LARGE: int = 19
-const GRID_ROWS_LARGE: int = 12
+const GRID_COLS_SMALL: int = 26
+const GRID_ROWS_SMALL: int = 18
+const GRID_COLS_MEDIUM: int = 32
+const GRID_ROWS_MEDIUM: int = 20
+const GRID_COLS_LARGE: int = 38
+const GRID_ROWS_LARGE: int = 24
 
 const INV_X: int = 1571
 const INV_Y: int = 72
@@ -33,6 +33,24 @@ var debug_stages: Dictionary = {}
 enum StageSize { SMALL, MEDIUM, LARGE }
 var stage_size: StageSize = StageSize.SMALL
 
+# --- ステージ前説明画像 ---
+var info_images: Dictionary = {
+	"how_to_play_1": "res://assets/sprites/how_to_play_1.png",
+	"how_to_play_2": "res://assets/sprites/how_to_play_2.png",
+}
+
+# --- セーブデータ ---
+const SAVE_PATH := "user://save_data.json"
+var save_data := {
+	"op_watched": false,
+	"max_cleared_stage": 0,
+	"special_endings": {},
+}
+
+# --- 設定 ---
+const SETTINGS_PATH := "user://settings.cfg"
+var _settings := ConfigFile.new()
+
 # --- UI Audio (Autoload で保持 → シーン跨ぎでも途切れない) ---
 var _se_hover: AudioStreamPlayer
 var _se_click: AudioStreamPlayer
@@ -45,10 +63,13 @@ var _transitioning: bool = false
 
 func _ready() -> void:
 	_setup_cursor()
+	_setup_audio_buses()
 	_init_debug_stages()
 	_init_stages()
 	_setup_ui_audio()
 	_setup_fade_overlay()
+	load_game()
+	_load_settings()
 
 
 func grid_cols() -> int:
@@ -93,17 +114,30 @@ func _setup_cursor() -> void:
 	Input.set_custom_mouse_cursor(small_tex, Input.CURSOR_ARROW, Vector2(10, 3))
 
 
+# --- オーディオバス ---
+
+func _setup_audio_buses() -> void:
+	if AudioServer.get_bus_index("BGM") == -1:
+		AudioServer.add_bus()
+		AudioServer.set_bus_name(AudioServer.bus_count - 1, "BGM")
+	if AudioServer.get_bus_index("SE") == -1:
+		AudioServer.add_bus()
+		AudioServer.set_bus_name(AudioServer.bus_count - 1, "SE")
+
+
 # --- UI 効果音 ---
 
 func _setup_ui_audio() -> void:
 	_se_hover = AudioStreamPlayer.new()
 	_se_hover.stream = load("res://assets/audio/ui_hover.mp3")
 	_se_hover.volume_db = -7.0
+	_se_hover.bus = "SE"
 	add_child(_se_hover)
 
 	_se_click = AudioStreamPlayer.new()
 	_se_click.stream = load("res://assets/audio/ui_click.mp3")
 	_se_click.volume_db = -6.0
+	_se_click.bus = "SE"
 	add_child(_se_click)
 
 
@@ -176,15 +210,15 @@ func cell_height() -> float:
 
 func grid_to_world(col: int, row: int) -> Vector2:
 	return Vector2(
-		STAGE_X + (col + 0.5) * cell_width(),
-		STAGE_Y + (row + 0.5) * cell_height()
+		STAGE_X + (col + 1) * cell_width(),
+		STAGE_Y + (row + 1) * cell_height()
 	)
 
 
 func world_to_grid(pos: Vector2) -> Vector2i:
-	var col := int(floor((pos.x - STAGE_X) / cell_width()))
-	var row := int(floor((pos.y - STAGE_Y) / cell_height()))
-	return Vector2i(clampi(col, 0, grid_cols() - 1), clampi(row, 0, grid_rows() - 1))
+	var col := int(round((pos.x - STAGE_X) / cell_width() - 1))
+	var row := int(round((pos.y - STAGE_Y) / cell_height() - 1))
+	return Vector2i(clampi(col, 0, grid_cols() - 2), clampi(row, 0, grid_rows() - 2))
 
 
 func snap_to_grid(pos: Vector2) -> Vector2:
@@ -225,128 +259,82 @@ func mirror_surface_dir(angle_deg: int) -> Vector2:
 func _init_debug_stages() -> void:
 	debug_stages[1] = {
 		"name": "基本操作",
-		"start": Vector2i(1, 4),
-		"goal": Vector2i(11, 4),
-		"mirror_count": 0,
-		"gimmicks": [],
+		"scene": "res://scenes/stages/debug_1.tscn",
 	}
 
 	debug_stages[2] = {
 		"name": "鏡の反射",
-		"start": Vector2i(0, 7),
-		"goal": Vector2i(12, 1),
-		"mirror_count": 1,
-		"gimmicks": [],
+		"scene": "res://scenes/stages/debug_2.tscn",
 	}
 
 	debug_stages[3] = {
 		"name": "複数の鏡",
-		"start": Vector2i(0, 4),
-		"goal": Vector2i(12, 4),
-		"mirror_count": 2,
-		"gimmicks": [
-			{"type": "wall_block", "pos": Vector2i(6, 1), "size": Vector2i(1, 7)},
-		],
+		"scene": "res://scenes/stages/debug_3.tscn",
 	}
 
 	debug_stages[4] = {
 		"name": "固定鏡",
-		"start": Vector2i(0, 8),
-		"goal": Vector2i(6, 0),
-		"mirror_count": 0,
-		"gimmicks": [
-			{"type": "fixed_mirror", "pos": Vector2i(6, 8), "angle": 315},
-		],
+		"scene": "res://scenes/stages/debug_4.tscn",
 	}
 
 	debug_stages[5] = {
 		"name": "総合",
-		"start": Vector2i(0, 8),
-		"goal": Vector2i(12, 0),
-		"mirror_count": 3,
-		"gimmicks": [
-			{"type": "wall_block", "pos": Vector2i(3, 0), "size": Vector2i(1, 4)},
-			{"type": "wall_block", "pos": Vector2i(3, 5), "size": Vector2i(1, 4)},
-			{"type": "wall_block", "pos": Vector2i(9, 1), "size": Vector2i(1, 3)},
-			{"type": "wall_block", "pos": Vector2i(9, 5), "size": Vector2i(1, 4)},
-		],
+		"scene": "res://scenes/stages/debug_5.tscn",
 	}
 
 	debug_stages[6] = {
 		"name": "両面鏡",
-		"start": Vector2i(0, 4),
-		"goal": Vector2i(12, 4),
-		"mirror_count": 0,
-		"gimmicks": [
-			{"type": "wall_block", "pos": Vector2i(6, 0), "size": Vector2i(1, 3)},
-			{"type": "wall_block", "pos": Vector2i(6, 6), "size": Vector2i(1, 3)},
-			{"type": "fixed_mirror", "pos": Vector2i(6, 4), "angle": 45, "mirror_kind": "two_sided"},
-			{"type": "fixed_mirror", "pos": Vector2i(10, 0), "angle": 135, "mirror_kind": "two_sided"},
-		],
+		"scene": "res://scenes/stages/debug_6.tscn",
 	}
 
 	debug_stages[7] = {
 		"name": "マジックミラー",
-		"start": Vector2i(0, 8),
-		"goal": Vector2i(12, 0),
-		"mirror_count": 1,
-		"gimmicks": [
-			{"type": "wall_block", "pos": Vector2i(4, 0), "size": Vector2i(1, 5)},
-			{"type": "wall_block", "pos": Vector2i(8, 4), "size": Vector2i(1, 5)},
-			{"type": "fixed_mirror", "pos": Vector2i(4, 7), "angle": 315, "mirror_kind": "one_way"},
-			{"type": "fixed_mirror", "pos": Vector2i(8, 2), "angle": 315, "mirror_kind": "one_way"},
-		],
+		"scene": "res://scenes/stages/debug_7.tscn",
 	}
 
 	debug_stages[8] = {
 		"name": "移動壁と敵",
-		"start": Vector2i(0, 4),
-		"goal": Vector2i(12, 4),
-		"mirror_count": 2,
-		"gimmicks": [
-			{"type": "moving_platform", "pos": Vector2i(5, 3), "size": Vector2i(1, 3),
-			 "axis": "x", "range": [3, 7], "speed": 1.5},
-			{"type": "enemy_zone", "pos": Vector2i(9, 3), "size": Vector2i(1, 3), "id": "slime"},
-			{"type": "refire_mirror", "pos": Vector2i(6, 0)},
-		],
+		"scene": "res://scenes/stages/debug_8.tscn",
 	}
 
 	debug_stages[9] = {
 		"name": "回収テスト",
-		"start": Vector2i(0, 4),
-		"goal": Vector2i(12, 4),
-		"mirror_count": 1,
-		"inv_capacity": 4,
-		"gimmicks": [
-			{"type": "wall_block", "pos": Vector2i(6, 0), "size": Vector2i(1, 4)},
-			{"type": "wall_block", "pos": Vector2i(6, 5), "size": Vector2i(1, 4)},
-			{"type": "placed_mirror", "pos": Vector2i(3, 2), "angle": 45},
-			{"type": "placed_mirror", "pos": Vector2i(3, 6), "angle": 315},
-			{"type": "fixed_mirror", "pos": Vector2i(9, 2), "angle": 315},
-		],
+		"scene": "res://scenes/stages/debug_9.tscn",
 	}
 
 
 func _init_stages() -> void:
-	# 全体サイズ: (12, 8)
 	stages[1] = {
 		"name": "チュートリアル1",
-		"title": "1",
-		"start": Vector2i(6, 1),
-		"goal": Vector2i(6, 7),
-		"mirror_count": 0,
-		"gimmicks": [],
+		"scene": "res://scenes/stages/stage_1.tscn",
 	}
 	stages[2] = {
 		"name": "感覚遮断何か",
-		"title": "2",
-		"start": Vector2i(11, 1),
-		"goal": Vector2i(1, 7),
-		"mirror_count": 1,
-		"gimmicks": [
-			{"type": "wall_block", "pos": Vector2i(0, 4), "size": Vector2i(9, 1)},
-			{"type": "enemy_zone", "pos": Vector2i(0, 3), "size": Vector2i(2, 1), "id": "pitfall"},
-		]
+		"scene": "res://scenes/stages/stage_2.tscn",
+	}
+	stages[3] = {
+		"name": "触手的何か",
+		"scene": "res://scenes/stages/stage_3.tscn",
+	}
+	stages[4] = {
+		"name": "ミミックらしき何か",
+		"scene": "res://scenes/stages/stage_4.tscn",
+	}
+	stages[5] = {
+		"name": "わ〜む",
+		"scene": "res://scenes/stages/stage_5.tscn",
+	}
+	stages[6] = {
+		"name": "くちゅくちゅ",
+		"scene": "res://scenes/stages/stage_6.tscn",
+	}
+	stages[7] = {
+		"name": "サ〜きゅサ〜きゅ",
+		"scene": "res://scenes/stages/stage_7.tscn",
+	}
+	stages[8] = {
+		"name": "ゴリゴリゴリゴリゴリゴリゴリ",
+		"scene": "res://scenes/stages/stage_8.tscn",
 	}
 
 
@@ -363,8 +351,114 @@ func get_stage_data(num: int) -> Dictionary:
 	return {}
 
 
+func get_stage_scene_path(num: int) -> String:
+	var src := _active_stages()
+	if src.has(num):
+		return src[num].get("scene", "")
+	if src.size() > 0:
+		return src.values()[0].get("scene", "")
+	return ""
+
+
 func get_max_stage() -> int:
 	var src := _active_stages()
 	if src.is_empty():
 		return 0
 	return src.keys().max()
+
+
+func get_info_image_path(info_id: String) -> String:
+	return info_images.get(info_id, "")
+
+
+# --- セーブ/ロード ---
+
+func save_game() -> void:
+	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if file:
+		file.store_string(JSON.stringify(save_data))
+		file.close()
+
+
+func load_game() -> void:
+	if not FileAccess.file_exists(SAVE_PATH):
+		return
+	var file := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	if not file:
+		return
+	var json := JSON.new()
+	if json.parse(file.get_as_text()) == OK and json.data is Dictionary:
+		var data: Dictionary = json.data
+		if data.has("op_watched"):
+			save_data["op_watched"] = data["op_watched"]
+		if data.has("max_cleared_stage"):
+			save_data["max_cleared_stage"] = int(data["max_cleared_stage"])
+		if data.has("special_endings") and data["special_endings"] is Dictionary:
+			save_data["special_endings"] = data["special_endings"]
+	file.close()
+
+
+func mark_op_watched() -> void:
+	save_data["op_watched"] = true
+	save_game()
+
+
+func mark_stage_cleared(stage_num: int) -> void:
+	if stage_num > int(save_data["max_cleared_stage"]):
+		save_data["max_cleared_stage"] = stage_num
+	save_game()
+
+
+func mark_special_ending(stage_num: int, enemy_id: String) -> void:
+	save_data["special_endings"][str(stage_num)] = enemy_id
+	save_game()
+
+
+func has_special_ending(stage_num: int) -> bool:
+	return save_data["special_endings"].has(str(stage_num))
+
+
+func get_special_ending_enemy(stage_num: int) -> String:
+	return save_data["special_endings"].get(str(stage_num), "")
+
+
+# --- 設定の保存/読込 ---
+
+func _load_settings() -> void:
+	_settings.load(SETTINGS_PATH)
+	_apply_bgm_volume(_settings.get_value("audio", "bgm_volume", 80.0))
+	_apply_se_volume(_settings.get_value("audio", "se_volume", 80.0))
+
+
+func save_settings() -> void:
+	_settings.save(SETTINGS_PATH)
+
+
+func get_bgm_volume() -> float:
+	return _settings.get_value("audio", "bgm_volume", 80.0)
+
+
+func get_se_volume() -> float:
+	return _settings.get_value("audio", "se_volume", 80.0)
+
+
+func set_bgm_volume(value: float) -> void:
+	_settings.set_value("audio", "bgm_volume", value)
+	_apply_bgm_volume(value)
+
+
+func set_se_volume(value: float) -> void:
+	_settings.set_value("audio", "se_volume", value)
+	_apply_se_volume(value)
+
+
+func _apply_bgm_volume(value: float) -> void:
+	var idx := AudioServer.get_bus_index("BGM")
+	if idx >= 0:
+		AudioServer.set_bus_volume_db(idx, linear_to_db(value / 100.0))
+
+
+func _apply_se_volume(value: float) -> void:
+	var idx := AudioServer.get_bus_index("SE")
+	if idx >= 0:
+		AudioServer.set_bus_volume_db(idx, linear_to_db(value / 100.0))

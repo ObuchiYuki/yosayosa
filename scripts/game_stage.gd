@@ -12,6 +12,7 @@ var tex_guide: Texture2D
 var tex_mirror_sign: Texture2D
 var tex_retry_icon := preload("res://assets/sprites/retry_icon.png")
 var tex_settings_icon := preload("res://assets/sprites/settings_icon.png")
+var tex_back_icon := preload("res://assets/sprites/back_icon.png")
 var tex_inv_slot := preload("res://assets/sprites/inv_slot.png")
 
 var light_anim_frames: Array[Texture2D] = []
@@ -33,10 +34,12 @@ var motion_blur_sprites: Array[Sprite2D] = []
 
 # ==================== ステージオブジェクト ====================
 var stage_objects: Array[StageObject] = []
-var stage_data: Dictionary
 var _initial_mirror_count: int = 0
 var _original_start_pos: Vector2
 var _cached_wall_rects: Array[Rect2] = []
+var _stage_title: String = ""
+var _stage_pre_info: String = ""
+var _placed_mirrors_data: Array[Dictionary] = []
 
 # ==================== ステート ====================
 enum St { IDLE, AIMING, DRAGGING }
@@ -69,6 +72,8 @@ var flash_alpha: float = 0.0
 const DRAG_THRESHOLD: float = 10.0
 var _press_origin: Vector2 = Vector2.ZERO
 var _press_object: StageObject = null
+var _held_origin_pos: Vector2 = Vector2.ZERO
+var _held_from_inventory: bool = false
 
 const MOTION_BLUR_COUNT: int = 10
 const MOTION_BLUR_SPACING: float = 10.0
@@ -88,11 +93,21 @@ var _sounded_bounce_indices: Array[int] = []
 var _clear_cutin: ClearCutin
 var _fail_cutin: FailCutin
 
+# ==================== ステージ前説明 ====================
+var _pre_info_active: bool = false
+var _pre_info_layer: CanvasLayer
+var _pre_info_overlay: ColorRect
+var _pre_info_sprite: Sprite2D
+var _se_page_turn: AudioStreamPlayer
+
 # ==================== 衝突アニメーション ====================
 var _collision_sp: Sprite2D = null
 var _collision_frames: Array[Texture2D] = []
 var _collision_frame_idx: int = 0
 var _collision_looping: bool = false
+var _collision_loop_start: int = 4
+var _collision_delay_intro: float = 0.175
+var _collision_delay_loop: float = 0.25
 
 
 # ==================== 初期化 ====================
@@ -120,9 +135,16 @@ func _ready() -> void:
 		var tex: Texture2D = load(path)
 		if tex:
 			light_anim_frames.append(tex)
-	stage_data = GameManager.get_stage_data(GameManager.current_stage)
-	_build_scene()
+
+	var scene_path := GameManager.get_stage_scene_path(GameManager.current_stage)
+	var build_result := StageBuilder.build_from_scene(scene_path)
+	_stage_title = build_result.get("title", "")
+	_stage_pre_info = build_result.get("pre_info", "")
+	_placed_mirrors_data = build_result.get("placed_mirrors", [])
+
+	_build_scene(build_result)
 	_setup_audio()
+	_try_show_pre_info()
 
 
 func _setup_audio() -> void:
@@ -131,6 +153,7 @@ func _setup_audio() -> void:
 	bgm_stream.loop = true
 	bgm_player.stream = bgm_stream
 	bgm_player.volume_db = -8.0
+	bgm_player.bus = "BGM"
 	bgm_player.autoplay = true
 	add_child(bgm_player)
 	bgm_player.play()
@@ -138,17 +161,17 @@ func _setup_audio() -> void:
 	se_shoot_player = AudioStreamPlayer.new()
 	se_shoot_player.stream = load("res://assets/audio/se_shoot.mp3")
 	se_shoot_player.volume_db = -4.0
-	se_shoot_player.bus = "Master"
+	se_shoot_player.bus = "SE"
 	add_child(se_shoot_player)
 
 	se_reflect_player = AudioStreamPlayer.new()
 	se_reflect_player.stream = load("res://assets/audio/se_reflect.wav")
 	se_reflect_player.volume_db = -2.0
-	se_reflect_player.bus = "Master"
+	se_reflect_player.bus = "SE"
 	add_child(se_reflect_player)
 
 
-func _build_scene() -> void:
+func _build_scene(build_result: Dictionary) -> void:
 	var bg := Sprite2D.new()
 	bg.texture = tex_template
 	bg.centered = false
@@ -159,9 +182,15 @@ func _build_scene() -> void:
 	_create_floor()
 
 	objects_layer = Node2D.new()
+	objects_layer.clip_children = CanvasItem.CLIP_CHILDREN_ONLY
+	objects_layer.draw.connect(func():
+		objects_layer.draw_rect(
+			Rect2(GameManager.STAGE_X, GameManager.STAGE_Y,
+				GameManager.STAGE_W, GameManager.STAGE_H),
+			Color.WHITE, true))
 	add_child(objects_layer)
+	objects_layer.queue_redraw()
 
-	var build_result := StageBuilder.build(stage_data)
 	stage_objects = build_result.objects
 	_initial_mirror_count = build_result.mirror_count
 	inv_capacity = build_result.inv_capacity
@@ -170,12 +199,17 @@ func _build_scene() -> void:
 
 	for obj in stage_objects:
 		objects_layer.add_child(obj)
+		if obj is MovingPlatformObject:
+			obj.set_stage_context(stage_objects)
+
+	_sync_all_mirror_groove_slides()
+	call_deferred("_sync_all_mirror_groove_slides")
 
 	effects_layer = Node2D.new()
 	effects_layer.z_index = 3
 	add_child(effects_layer)
 
-	var ch: float = GameManager.cell_height()
+	var ch: float = GameManager.cell_height() * 2
 	player_sprite = Sprite2D.new()
 	player_sprite.texture = tex_player
 	player_sprite.position = player_start_pos
@@ -319,7 +353,7 @@ func _spawn_light_anim(pos: Vector2) -> void:
 	frames.set_animation_loop("flash", false)
 	anim_sprite.sprite_frames = frames
 	anim_sprite.position = pos
-	var sc: float = GameManager.cell_width() / 100.0 * 0.9
+	var sc: float = GameManager.cell_width() * 2 / 100.0 * 0.9
 	anim_sprite.scale = Vector2(sc, sc)
 	effects_layer.add_child(anim_sprite)
 	anim_sprite.play("flash")
@@ -391,7 +425,7 @@ func _build_ui() -> void:
 	add_child(ui_layer)
 
 	stage_label = Label.new()
-	var display_title: String = stage_data.get("title", "1 - %d" % GameManager.current_stage)
+	var display_title: String = _stage_title if _stage_title != "" else "1 - %d" % GameManager.current_stage
 	stage_label.text = display_title
 	var stage_font := load("res://assets/fonts/BestTen-DOT.otf")
 	stage_label.add_theme_font_override("font", stage_font)
@@ -482,8 +516,31 @@ func _build_bottom_icons() -> void:
 	retry_icon.pressed.connect(GameManager.play_click_se)
 	ui_layer.add_child(retry_icon)
 
+	var back_icon := TextureButton.new()
+	back_icon.texture_normal = tex_back_icon
+	back_icon.ignore_texture_size = true
+	back_icon.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
+	back_icon.position = Vector2(inv_right - icon_size - gap - icon_size - gap - icon_size, bottom_y)
+	back_icon.custom_minimum_size = Vector2(icon_size, icon_size)
+	back_icon.size = Vector2(icon_size, icon_size)
+	back_icon.pressed.connect(_on_title)
+	back_icon.mouse_entered.connect(GameManager.play_hover_se)
+	back_icon.pressed.connect(GameManager.play_click_se)
+	ui_layer.add_child(back_icon)
+
 
 # ==================== ヘルパー ====================
+
+func _sync_all_mirror_groove_slides() -> void:
+	for obj in stage_objects:
+		if obj is MirrorObject:
+			(obj as MirrorObject).sync_groove_slide_attachment(stage_objects)
+
+
+func _clear_mirror_groove_slide_if_any(obj: StageObject) -> void:
+	if obj is MirrorObject:
+		(obj as MirrorObject).clear_groove_slide()
+
 
 func _collect_wall_rects() -> void:
 	_cached_wall_rects.clear()
@@ -493,7 +550,7 @@ func _collect_wall_rects() -> void:
 
 func _draggable_object_at(pos: Vector2) -> StageObject:
 	var best: StageObject = null
-	var best_dist: float = GameManager.cell_width() * 0.6
+	var best_dist: float = GameManager.cell_width() * 2 * 0.6
 	for obj in stage_objects:
 		if obj.is_draggable() and obj.hit_test(pos):
 			var d: float = obj.global_position.distance_to(pos)
@@ -516,14 +573,21 @@ func _show_result(success: bool) -> void:
 	bgm_player.stop()
 
 	if success:
+		if not GameManager.is_debug_mode:
+			GameManager.mark_stage_cleared(GameManager.current_stage)
 		_clear_cutin = ClearCutin.new()
 		add_child(_clear_cutin)
 		_clear_cutin.retry_requested.connect(reset_stage)
 		_clear_cutin.next_requested.connect(_on_next_stage)
 		_clear_cutin.play()
 	else:
+		if not GameManager.is_debug_mode and _end_reason == "enemy" and _hit_enemy_id != "":
+			GameManager.mark_special_ending(GameManager.current_stage, _hit_enemy_id)
 		player_sprite.visible = false
-		_start_collision_anim()
+		if _end_reason == "water":
+			_start_splash_anim()
+		else:
+			_start_collision_anim()
 
 
 func _handle_refire() -> void:
@@ -636,6 +700,9 @@ func _start_collision_anim() -> void:
 
 	_collision_frame_idx = 0
 	_collision_looping = false
+	_collision_loop_start = 4
+	_collision_delay_intro = 0.175
+	_collision_delay_loop = 0.25
 	_show_fail_cutin()
 	_advance_collision_frame()
 
@@ -646,14 +713,87 @@ func _advance_collision_frame() -> void:
 
 	_collision_sp.texture = _collision_frames[_collision_frame_idx]
 
-	if _collision_frame_idx < 4:
+	var delay_intro: float = _collision_delay_intro
+	var delay_loop: float = _collision_delay_loop
+	if _collision_frame_idx < _collision_loop_start:
 		_collision_frame_idx += 1
-		var delay: float = 0.175
-		get_tree().create_timer(delay).timeout.connect(_advance_collision_frame)
+		get_tree().create_timer(delay_intro).timeout.connect(_advance_collision_frame)
 	else:
 		_collision_looping = true
-		_collision_frame_idx = 4 if _collision_frame_idx == 5 else 5
-		get_tree().create_timer(0.25).timeout.connect(_advance_collision_frame)
+		if _collision_frame_idx >= _collision_loop_start + 1:
+			_collision_frame_idx = _collision_loop_start
+		else:
+			_collision_frame_idx = _collision_loop_start + 1
+		get_tree().create_timer(delay_loop).timeout.connect(_advance_collision_frame)
+
+
+func _start_splash_anim() -> void:
+	var direction := _get_impact_direction()
+	_collision_frames.clear()
+	for i in range(1, 9):
+		var path: String = "res://assets/sprites/water_splash/splash_%02d.png" % i
+		var tex: Texture2D = load(path)
+		if tex:
+			_collision_frames.append(tex)
+	if _collision_frames.is_empty():
+		_show_fail_cutin()
+		return
+
+	var se_splash := AudioStreamPlayer.new()
+	se_splash.stream = load("res://assets/audio/se_water_splash.mp3")
+	se_splash.volume_db = -4.0
+	se_splash.bus = "SE"
+	add_child(se_splash)
+	se_splash.play()
+	se_splash.finished.connect(se_splash.queue_free)
+
+	_collision_sp = Sprite2D.new()
+	_collision_sp.texture = _collision_frames[0]
+
+	var tex_w: float = _collision_sp.texture.get_width()
+	var tex_h: float = _collision_sp.texture.get_height()
+	var cw: float = GameManager.cell_width()
+	var ch: float = GameManager.cell_height()
+	var sc: float = minf(cw / tex_w, ch / tex_h) * 2.0
+	_collision_sp.scale = Vector2(sc, sc)
+
+	match direction:
+		"left":
+			_collision_sp.rotation = 0
+		"right":
+			_collision_sp.rotation = PI
+		"down":
+			_collision_sp.rotation = -PI / 2.0
+		"up":
+			_collision_sp.rotation = PI / 2.0
+
+	var half_w: float = tex_w * sc / 2.0
+	var half_h: float = tex_h * sc / 2.0
+	var wall_pt: Vector2 = light_path[-1]
+	var display_pos: Vector2
+
+	match direction:
+		"right":
+			display_pos = Vector2(wall_pt.x - half_w, wall_pt.y)
+		"left":
+			display_pos = Vector2(wall_pt.x + half_w, wall_pt.y)
+		"down":
+			display_pos = Vector2(wall_pt.x, wall_pt.y - half_h)
+		"up":
+			display_pos = Vector2(wall_pt.x, wall_pt.y + half_h - ch)
+		_:
+			display_pos = wall_pt
+
+	_collision_sp.position = display_pos
+	add_child(_collision_sp)
+
+	_collision_frame_idx = 0
+	_collision_looping = false
+	_collision_loop_start = 6
+	_collision_delay_intro = 0.175
+	_collision_delay_loop = 0.25
+	_show_fail_cutin()
+	_advance_collision_frame()
 
 
 func _show_fail_cutin() -> void:
@@ -670,6 +810,10 @@ func _show_fail_cutin() -> void:
 # ==================== 入力 ====================
 
 func _input(event: InputEvent) -> void:
+	if _pre_info_active:
+		if event is InputEventMouseButton and event.pressed:
+			_dismiss_pre_info()
+		return
 	if _result_active:
 		return
 	if is_shooting:
@@ -702,6 +846,10 @@ func _on_mouse_button(ev: InputEventMouseButton) -> void:
 						state = St.DRAGGING
 						held_object.z_as_relative = false
 						held_object.z_index = 100
+						_held_from_inventory = true
+						if held_object is MirrorObject:
+							(held_object as MirrorObject).is_being_held = true
+							held_object.modulate.a = 0.5
 				elif GameManager.is_in_stage(pos):
 					state = St.AIMING
 					_update_aim(pos)
@@ -734,10 +882,16 @@ func _on_mouse_motion(ev: InputEventMouseMotion) -> void:
 	if _press_object:
 		if ev.position.distance_to(_press_origin) >= DRAG_THRESHOLD:
 			held_object = _press_object
+			_clear_mirror_groove_slide_if_any(held_object)
 			_press_object = null
 			state = St.DRAGGING
+			_held_origin_pos = held_object.position
+			_held_from_inventory = false
 			held_object.z_as_relative = false
 			held_object.z_index = 100
+			if held_object is MirrorObject:
+				(held_object as MirrorObject).is_being_held = true
+				held_object.modulate.a = 0.5
 
 	match state:
 		St.AIMING:
@@ -792,6 +946,9 @@ func _release_object() -> void:
 	if not held_object:
 		state = St.IDLE
 		return
+	if held_object is MirrorObject:
+		(held_object as MirrorObject).is_being_held = false
+	held_object.modulate.a = 1.0
 	held_object.z_as_relative = true
 	held_object.z_index = 2
 	var pos := held_object.position
@@ -802,8 +959,40 @@ func _release_object() -> void:
 		held_object.position = GameManager.snap_to_grid(pos)
 	else:
 		held_object.position = GameManager.snap_to_grid(pos)
+	if not _inv_bg_rect.has_point(pos) and _is_position_on_wall(held_object.position):
+		if _held_from_inventory:
+			_return_to_inventory(held_object)
+		else:
+			held_object.position = _held_origin_pos
+		held_object = null
+		state = St.IDLE
+		return
+	if held_object is MirrorObject:
+		var m := held_object as MirrorObject
+		m.clear_groove_slide()
+		for o in stage_objects:
+			if o is GrooveObject:
+				if (o as GrooveObject).try_bind_mirror(m):
+					break
 	held_object = null
 	state = St.IDLE
+	_repopulate_water_sources()
+
+
+func _is_position_on_wall(pos: Vector2) -> bool:
+	for obj in stage_objects:
+		if obj is MirrorObject or obj is WaterSourceObject:
+			continue
+		for r in obj.get_wall_rects():
+			if r.has_point(pos):
+				return true
+	return false
+
+
+func _repopulate_water_sources() -> void:
+	for obj in stage_objects:
+		if obj is WaterSourceObject:
+			obj.notify_obstacle_changed(stage_objects)
 
 
 # ==================== モーションブラー ====================
@@ -985,6 +1174,64 @@ func _on_path_end() -> void:
 			_show_result(false)
 
 
+# ==================== ステージ前説明オーバーレイ ====================
+
+func _try_show_pre_info() -> void:
+	var info_id: String = _stage_pre_info
+	if info_id == "":
+		return
+	var tex_path: String = GameManager.get_info_image_path(info_id)
+	if tex_path == "":
+		return
+	var tex: Texture2D = load(tex_path)
+	if not tex:
+		return
+
+	_pre_info_active = true
+
+	_pre_info_layer = CanvasLayer.new()
+	_pre_info_layer.layer = 50
+	add_child(_pre_info_layer)
+
+	_pre_info_overlay = ColorRect.new()
+	_pre_info_overlay.size = Vector2(GameManager.SCREEN_W, GameManager.SCREEN_H)
+	_pre_info_overlay.color = Color(0, 0, 0, 0)
+	_pre_info_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	_pre_info_layer.add_child(_pre_info_overlay)
+
+	_pre_info_sprite = Sprite2D.new()
+	_pre_info_sprite.texture = tex
+	_pre_info_sprite.scale = Vector2(2.0, 2.0)
+	_pre_info_sprite.position = Vector2(GameManager.SCREEN_W / 2.0, GameManager.SCREEN_H / 2.0)
+	_pre_info_sprite.modulate.a = 0.0
+	_pre_info_layer.add_child(_pre_info_sprite)
+
+	_se_page_turn = AudioStreamPlayer.new()
+	_se_page_turn.stream = load("res://assets/audio/se_page_turn.mp3")
+	_se_page_turn.volume_db = -4.0
+	_se_page_turn.bus = "SE"
+	add_child(_se_page_turn)
+
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(_pre_info_overlay, "color:a", 0.5, 0.4)
+	tw.tween_property(_pre_info_sprite, "modulate:a", 1.0, 0.4)
+	await tw.finished
+	_se_page_turn.play()
+
+
+func _dismiss_pre_info() -> void:
+	_pre_info_active = false
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(_pre_info_overlay, "color:a", 0.0, 0.3)
+	tw.tween_property(_pre_info_sprite, "modulate:a", 0.0, 0.3)
+	await tw.finished
+	if is_instance_valid(_pre_info_layer):
+		_pre_info_layer.queue_free()
+		_pre_info_layer = null
+
+
 # ==================== ナビゲーション ====================
 
 ## preserve_placed_mirrors: 失敗カットインのリトライ時 true（配置済み鏡・残インベントリを維持）
@@ -1031,7 +1278,7 @@ func reset_stage(preserve_placed_mirrors: bool = false) -> void:
 		child.queue_free()
 
 	for obj in stage_objects:
-		obj.on_stage_reset()
+		obj.on_stage_reset(preserve_placed_mirrors)
 
 	if not preserve_placed_mirrors:
 		var to_remove: Array[StageObject] = []
@@ -1043,14 +1290,16 @@ func reset_stage(preserve_placed_mirrors: bool = false) -> void:
 			objects_layer.remove_child(obj)
 			obj.queue_free()
 
-		for gimmick: Variant in stage_data.get("gimmicks", []):
-			var gd: Dictionary = gimmick as Dictionary
-			if gd.get("type") == "placed_mirror":
-				var m := MirrorObject.create(
-					GameManager.grid_to_world(gd.pos.x, gd.pos.y),
-					gd.angle, false)
-				objects_layer.add_child(m)
-				stage_objects.append(m)
+		for pm_data: Variant in _placed_mirrors_data:
+			var gd: Dictionary = pm_data as Dictionary
+			var kind: MirrorObject.MirrorKind = gd.get("mirror_kind", MirrorObject.MirrorKind.STANDARD)
+			var m := MirrorObject.create(
+				GameManager.grid_to_world(gd.pos.x, gd.pos.y),
+				gd.angle, false, kind)
+			objects_layer.add_child(m)
+			stage_objects.append(m)
+
+		_sync_all_mirror_groove_slides()
 
 		for v in inv_visuals:
 			if is_instance_valid(v):
@@ -1067,6 +1316,7 @@ func reset_stage(preserve_placed_mirrors: bool = false) -> void:
 			inv_count += 1
 
 	held_object = null
+	_repopulate_water_sources()
 	if not bgm_player.playing:
 		bgm_player.play()
 
